@@ -3,9 +3,9 @@ use std::ops::{Add, Index, Mul, Neg};
 
 #[derive(Default, Debug, Copy, Clone)]
 pub(crate) struct Vec3<F: Copy + Mul<F, Output = F> + Add<F, Output = F>> {
-    x: F,
-    y: F,
-    z: F,
+    pub x: F,
+    pub y: F,
+    pub z: F,
 }
 
 // impl From<[f32; 3]> for Point3f {
