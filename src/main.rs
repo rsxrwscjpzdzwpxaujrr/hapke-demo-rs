@@ -127,7 +127,7 @@ fn init_window(sdl_context: &Sdl) -> Window {
 
 struct Data {
     normals: [[Vec3<f32>; 180]; 360],
-    params: OnceLock<[Box<[[HapkeParams; 180]; 360]>; 3]>,
+    params: [Box<[[HapkeParams; 180]; 360]>; 3],
     light: RwLock<Vec3<f32>>,
     camera: RwLock<Vec3<f32>>,
     mode: RwLock<Mode>,
@@ -137,9 +137,11 @@ struct Data {
 impl Data {
     fn new() -> Data {
         Data {
-            params: OnceLock::from([ load_hapke("hapke_param_map_643nm.tif"),
-                                     load_hapke("hapke_param_map_566nm.tif"),
-                                     load_hapke("hapke_param_map_415nm.tif"), ]),
+            params: [ 
+                load_hapke("hapke_param_map_643nm.tif"),
+                load_hapke("hapke_param_map_566nm.tif"),
+                load_hapke("hapke_param_map_415nm.tif"), 
+            ],
             light: RwLock::new([-0.93847078, -0.32556817, 0.11522973].into()),
             camera: RwLock::new([-0.8171755, 0.22495106, -0.53068].into()),
             mode: RwLock::new(Mode::default()),
@@ -183,7 +185,7 @@ fn gen_threads(data: Arc<Data>) -> Vec<(Arc<DoubleBuffer<Buffer>>, JoinHandle<()
 
                 let light = data.light.read().clone();
                 let camera = data.camera.read().clone();
-                let params = data.params.get().unwrap().clone();
+                let params = &data.params;
                 let mode = *(data.mode.read());
                 let exposure = data.exposure.read().clone();
 
