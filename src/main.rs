@@ -251,7 +251,7 @@ fn polar_from_screen_coord(x: i32, y: i32, window: &Window) -> Option<(f32, f32)
             None
         }
         else {
-            Some(((xusize as f32).to_radians(), ((yusize - 90) as f32).to_radians()))
+            Some((((xusize - 180) as f32).to_radians(), ((yusize - 90) as f32).to_radians()))
         }
     } else {
         // todo
@@ -261,7 +261,7 @@ fn polar_from_screen_coord(x: i32, y: i32, window: &Window) -> Option<(f32, f32)
 
 fn id_from_polar(phi: f32, theta: f32) -> (usize, usize) {
     (
-        (phi.to_degrees() as usize).clamp(0, 360 - 1),
+        ((phi.to_degrees() + 180.0) as usize).clamp(0, 360 - 1),
         ((theta.to_degrees() + 90.0) as usize).clamp(0, 180 - 1),
     )
 }

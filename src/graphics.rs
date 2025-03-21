@@ -225,10 +225,10 @@ impl Graphics {
         let translate = [0.0, -0.5, 0.0];
         
         add_quads(&mut buffer, vec![[
-            (Vec3::<GLfloat>::from([-1.0, -1.0,  0.0,]).scale(scale) + translate, [0.0, 0.0,],),
-            (Vec3::<GLfloat>::from([ 1.0, -1.0,  0.0,]).scale(scale) + translate, [1.0, 0.0,],),
-            (Vec3::<GLfloat>::from([ 1.0,  1.0,  0.0,]).scale(scale) + translate, [1.0, 1.0,],),
-            (Vec3::<GLfloat>::from([-1.0,  1.0,  0.0,]).scale(scale) + translate, [0.0, 1.0,],),
+            (Vec3::<GLfloat>::from([-1.0, -1.0,  0.0,]).scale(scale) + translate, [-0.5, 0.0,],),
+            (Vec3::<GLfloat>::from([ 1.0, -1.0,  0.0,]).scale(scale) + translate, [ 0.5, 0.0,],),
+            (Vec3::<GLfloat>::from([ 1.0,  1.0,  0.0,]).scale(scale) + translate, [ 0.5, 1.0,],),
+            (Vec3::<GLfloat>::from([-1.0,  1.0,  0.0,]).scale(scale) + translate, [-0.5, 1.0,],),
         ]]);
         
         add_sphere(&mut buffer);
