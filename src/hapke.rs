@@ -36,13 +36,12 @@ impl Shader<HapkeParams> for Hapke {
             return 0.0;
         }
 
-        // let tan_theta = data.theta.to_radians().tan();
-        let tan_theta = 0.0f32.to_radians().tan();
-
+        let tan_theta = data.theta.to_radians().tan();
         let K = 1.0 - data.phi;
 
-        let i = -acos_clamped(light.dot(normal));
-        let e = -acos_clamped(camera.dot(normal));
+        let i = PI - acos_clamped(light.dot(normal));
+        let e = PI - acos_clamped(camera.dot(normal));
+
         let g = acos_clamped(camera.dot(light));
 
         let Ei = e12(tan_theta, i);
