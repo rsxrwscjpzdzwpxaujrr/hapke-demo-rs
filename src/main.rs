@@ -143,7 +143,7 @@ impl Data {
             light: RwLock::new([FRAC_PI_4.sin(), 0.0, FRAC_PI_4.sin()].into()),
             camera: RwLock::new([0.0, 0.0, 1.0].into()),
             mode: RwLock::new(Mode::default()),
-            exposure: RwLock::new(1.0),
+            exposure: RwLock::new(2.0),
             normals: from_fn(|i| {
                 from_fn(|j| {
                     let x = i;
