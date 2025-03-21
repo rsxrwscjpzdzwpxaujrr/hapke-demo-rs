@@ -102,10 +102,6 @@ impl Shader<HapkeParams> for Hapke {
 
         let result = ls * K * (data.w / 4.0) * (p * (1.0 + data.Bs0 * bs) + M) * (1.0 + data.Bc0 * compute_Bc(g, data.hc)) * shadowing;
 
-        if result.is_nan() {
-            f32::sin(1.0);
-        }
-
         result
     }
 }
