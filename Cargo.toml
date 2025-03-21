@@ -1,0 +1,12 @@
+[package]
+name = "hapke-demo-rs"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+#glad-gl = { path = "../glad-gl" }
+sdl2 = "0.37.0"
+tiff = { git = "https://github.com/image-rs/image-tiff", rev = "36f7b3b" }
+egui = "0.31.1"
+egui_sdl2_gl = "0.31.0"
+glm = "0.2.3"
