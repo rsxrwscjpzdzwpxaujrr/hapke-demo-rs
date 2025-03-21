@@ -1,6 +1,8 @@
 # hapke-demo-rs
 Simple demo of Hapke photometric model used for rendering Moon.
 
+![](screenshot.png)
+
 Controls: Left-click on map to move the light source, right-click on map to move the camera.
 
 Methodology: [Sato, H., Robinson, M.S., Hapke, B., Denevi, B.W., Boyd, A.K. (2014) Resolved
