@@ -140,8 +140,8 @@ impl Data {
             params: OnceLock::from([ load_hapke("hapke_param_map_643nm.tif"),
                                      load_hapke("hapke_param_map_566nm.tif"),
                                      load_hapke("hapke_param_map_415nm.tif"), ]),
-            light: RwLock::new([FRAC_PI_4.sin(), 0.0, FRAC_PI_4.sin()].into()),
-            camera: RwLock::new([0.0, 0.0, 1.0].into()),
+            light: RwLock::new([-0.93847078, -0.32556817, 0.11522973].into()),
+            camera: RwLock::new([-0.8171755, 0.22495106, -0.53068].into()),
             mode: RwLock::new(Mode::default()),
             exposure: RwLock::new(2.0),
             normals: from_fn(|i| {
