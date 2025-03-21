@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 use crate::double_buffer::DoubleBuffer;
 use crate::hapke::{Hapke, HapkeParams};
 use crate::lambert::Lambert;
-use crate::utils::{to_cartesian};
+use crate::utils::{to_cartesian, to_polar};
 use crate::vec3::Vec3;
 use egui::mutex::RwLock;
 use egui::ViewportId;
@@ -303,8 +303,6 @@ fn main() {
     let mut triangle = graphics::Graphics::new();
 
     let start_time = Instant::now();
-    
-    let mut camera_polar = (-FRAC_PI_2, 0.0f32);
 
     while !quit {
         egui_state.input.time = Some(start_time.elapsed().as_secs_f64());
@@ -322,6 +320,8 @@ fn main() {
         threads.iter().enumerate().for_each(|(i, (buffer, _, _))| {
             triangle.update_texture(***buffer, i);
         });
+
+        let camera_polar = to_polar(*data.camera.read());
 
         // Then draw our triangle.
         triangle.draw(camera_polar.0, camera_polar.1);
@@ -426,10 +426,6 @@ fn main() {
                 mouse.pressed_mouse_buttons().for_each(|button| {
                     let mut light = data.light.write();
                     let mut camera = data.camera.write();
-                    
-                    if button == MouseButton::Right {
-                        camera_polar = (phi, theta);
-                    }
 
                     *(match button {
                         MouseButton::Left => light,
