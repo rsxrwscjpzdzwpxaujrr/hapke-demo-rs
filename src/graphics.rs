@@ -51,6 +51,7 @@ pub struct Graphics {
     pub vbo: GLuint,
     pub textures: [GLuint; 2],
     transform_matrix_loc: GLint,
+    triangle_count: i32,
 }
 
 fn shader_check_error(shader: GLuint) { unsafe {
@@ -142,7 +143,9 @@ pub fn link_program(vs: GLuint, fs: GLuint) -> GLuint {
     }
 }
 
-fn add_quads(buffer: &mut Vec<TriangleType>, quads: Vec<[VertexType; 4]>) {
+fn add_quads(buffer: &mut Vec<TriangleType>, quads: Vec<[VertexType; 4]>) -> i32 {
+    let triangle_count: i32 = quads.len() as i32 * 2;
+    
     quads.into_iter().for_each(|quad| {
         buffer.push([
             quad[0],
@@ -156,15 +159,17 @@ fn add_quads(buffer: &mut Vec<TriangleType>, quads: Vec<[VertexType; 4]>) {
             quad[3],
         ]);
     });
+
+    triangle_count
 }
 
-
-
-fn add_sphere(buffer: &mut Vec<TriangleType>) {
+fn add_sphere(buffer: &mut Vec<TriangleType>) -> i32 {
     let conv: f32 = 1.0 / 180.0;
 
     let step = 4;
     let step_i = step as i32;
+
+    let mut triangle_count = 0;
 
     for i in (0..360).step_by(step) {
         for j in (0..180).step_by(step) {
@@ -196,7 +201,7 @@ fn add_sphere(buffer: &mut Vec<TriangleType>) {
                 [i0 * conv * 0.5, (j1 + 90.0) * conv],
             ];
 
-            add_quads(buffer, vec![[
+            triangle_count += add_quads(buffer, vec![[
                 (points[0].into(), uv[0],),
                 (points[1].into(), uv[1],),
                 (points[2].into(), uv[2],),
@@ -204,6 +209,8 @@ fn add_sphere(buffer: &mut Vec<TriangleType>) {
             ]]);
         }
     }
+    
+    triangle_count
 }
 
 fn c_str(str: &str) -> CString {
@@ -224,14 +231,14 @@ impl Graphics {
         let scale = [1.0, 0.5, 1.0];
         let translate = [0.0, -0.5, 0.0];
         
-        add_quads(&mut buffer, vec![[
+        let mut triangle_count = add_quads(&mut buffer, vec![[
             (Vec3::<GLfloat>::from([-1.0, -1.0,  0.0,]).scale(scale) + translate, [-0.5, 0.0,],),
             (Vec3::<GLfloat>::from([ 1.0, -1.0,  0.0,]).scale(scale) + translate, [ 0.5, 0.0,],),
             (Vec3::<GLfloat>::from([ 1.0,  1.0,  0.0,]).scale(scale) + translate, [ 0.5, 1.0,],),
             (Vec3::<GLfloat>::from([-1.0,  1.0,  0.0,]).scale(scale) + translate, [-0.5, 1.0,],),
         ]]);
         
-        add_sphere(&mut buffer);
+        triangle_count += add_sphere(&mut buffer);
         
         unsafe {
             gl::GenVertexArrays(1, &mut vao);
@@ -302,7 +309,7 @@ impl Graphics {
             texture
         }) };
         
-        Graphics { program, vao, vbo, textures, transform_matrix_loc }
+        Graphics { program, vao, vbo, textures, transform_matrix_loc, triangle_count }
     }
 
     pub fn draw(&self, phi: f32, theta: f32) {
@@ -347,7 +354,7 @@ impl Graphics {
             
             self.set_transform_matrix(matrix);
 
-            gl::DrawArrays(gl::TRIANGLES, 6, 773286);
+            gl::DrawArrays(gl::TRIANGLES, 6, (self.triangle_count * 3) - 6);
 
             // Unbind the VAO
             gl::BindVertexArray(0);
