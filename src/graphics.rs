@@ -222,7 +222,7 @@ impl Graphics {
         let mut buffer = Vec::<TriangleType>::with_capacity(256);
 
         let scale = [1.0, 0.5, 1.0];
-        let translate = [0.0, 0.5, 0.0];
+        let translate = [0.0, -0.5, 0.0];
         
         add_quads(&mut buffer, vec![[
             (Vec3::<GLfloat>::from([-1.0, -1.0,  0.0,]).scale(scale) + translate, [0.0, 0.0,],),
@@ -340,7 +340,7 @@ impl Graphics {
 
             let phi = phi + FRAC_PI_2;
             
-            let matrix = glm::ext::translate(&matrix, Vector3::<f32>::new(0.0, -0.5, 0.0));
+            let matrix = glm::ext::translate(&matrix, Vector3::<f32>::new(0.5, 0.5, 0.0));
             let matrix = glm::ext::scale(&matrix, Vector3::<f32>::new(0.5, 0.5, 0.5));
             let matrix = glm::ext::rotate(&matrix, -theta, Vector3::<f32>::new(1.0, 0.0, 0.0));
             let matrix = glm::ext::rotate(&matrix, phi, Vector3::<f32>::new(0.0, 1.0, 0.0));

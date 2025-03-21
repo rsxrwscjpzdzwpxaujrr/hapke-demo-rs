@@ -240,9 +240,7 @@ fn polar_from_screen_coord(x: i32, y: i32, window: &Window) -> Option<(f32, f32)
     let width: i32 = window.size().0 as i32;
     let height: i32 = window.size().1 as i32;
     
-    if y > height / 2 {
-        let y = y - (window.size().1 as i32 / 2);
-
+    if y < height / 2 {
         let xusize = x / (width  / 360);
         let yusize = y / (height / 360);
         
