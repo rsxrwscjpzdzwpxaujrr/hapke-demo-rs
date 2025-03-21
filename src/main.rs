@@ -315,7 +315,7 @@ fn main() {
         // First clear the background to something nice.
         unsafe {
             // Clear the screen to green
-            gl::ClearColor(0.8, 0.8, 0.8, 0.0);
+            gl::ClearColor(0.0, 0.0, 0.0, 0.0);
             gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
         }
 
