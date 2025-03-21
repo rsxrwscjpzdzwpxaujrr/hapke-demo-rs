@@ -23,6 +23,6 @@ impl Shader<f32> for Lambert {
             return 0.0;
         }
 
-        mu0 * albedo * 0.5
+        mu0 * albedo * 0.333
     }
 }
