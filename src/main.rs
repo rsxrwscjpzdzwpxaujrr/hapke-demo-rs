@@ -170,7 +170,7 @@ impl Data {
     }
 }
 
-fn gen_threads(data: Arc<Data>) -> Vec<(Arc<DoubleBuffer<Buffer>>, JoinHandle<()>, impl Fn())> {
+fn gen_threads(data: Arc<Data>) -> Vec<(Arc<DoubleBuffer<Buffer>>, JoinHandle<()>)> {
     (0..THREAD_COUNT).into_iter().map(|thread_id| {
         let data = data.clone();
 
@@ -178,16 +178,10 @@ fn gen_threads(data: Arc<Data>) -> Vec<(Arc<DoubleBuffer<Buffer>>, JoinHandle<()
 
         let buffer = buffer_out.clone();
 
-        let render_out = Arc::new(AtomicBool::new(true));
-
-        let render = render_out.clone();
-
         let handle = thread::spawn(move || {
             let offset = thread_id;
 
             loop {
-                render.store(false, Ordering::Relaxed);
-
                 let light = data.light.read().clone();
                 let camera = data.camera.read().clone();
                 let params = &data.params;
@@ -237,7 +231,7 @@ fn gen_threads(data: Arc<Data>) -> Vec<(Arc<DoubleBuffer<Buffer>>, JoinHandle<()
             }
         });
 
-        (buffer_out, handle, move || { render_out.store(true, Ordering::Relaxed) })
+        (buffer_out, handle)
     }).collect()
 }
 
@@ -320,7 +314,7 @@ fn main() {
             gl.clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);
         }
 
-        threads.iter().enumerate().for_each(|(i, (buffer, _, _))| {
+        threads.iter().enumerate().for_each(|(i, (buffer, _))| {
             if let Some(buffer) = buffer.read() {
                 triangle.update_texture(&gl, buffer.as_ref(), i);
             }
@@ -440,10 +434,6 @@ fn main() {
                 });
             }
         }
-
-        threads.iter().for_each(|(_, _, render)| {
-            render()
-        });
     }
     
     triangle.deinit(&gl);
