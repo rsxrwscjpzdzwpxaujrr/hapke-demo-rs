@@ -1,13 +1,9 @@
-use std::cell::OnceCell;
 use std::f32::consts::FRAC_PI_2;
 use std::vec::Vec;
-use egui_sdl2_gl::gl;
-use egui_sdl2_gl::gl::types::*;
 use std::ffi::CString;
-use std::mem;
-use std::ptr;
 use std::str;
 use glm::{Matrix4, Vector3, Vector4};
+use glow::{HasContext, NativeProgram, PixelUnpackData};
 use crate::utils::to_cartesian;
 use crate::vec3::Vec3;
 
@@ -42,105 +38,58 @@ void main() {
     }
 }";
 
-type VertexType = (Vec3<GLfloat>, [GLfloat; 2]);
+type VertexType = (Vec3<f32>, [f32; 2]);
 type TriangleType = [VertexType; 3];
 
 pub struct Graphics {
-    pub program: GLuint,
-    pub vao: GLuint,
-    pub vbo: GLuint,
-    pub textures: [GLuint; 2],
-    transform_matrix_loc: GLint,
+    pub program: glow::NativeProgram,
+    pub vao: glow::NativeVertexArray,
+    pub vbo: glow::NativeBuffer,
+    pub textures: [glow::NativeTexture; 2],
+    transform_matrix_loc: glow::NativeUniformLocation,
     triangle_count: i32,
 }
 
-fn shader_check_error(shader: GLuint) { unsafe {
-    // Get the compile status
-    let mut status = gl::FALSE as GLint;
-    gl::GetShaderiv(shader, gl::COMPILE_STATUS, &mut status);
+unsafe fn create_program(
+    gl: &glow::Context,
+    vertex_shader_source: &str,
+    fragment_shader_source: &str,
+) -> NativeProgram {
+    let program = gl.create_program().expect("Cannot create program");
 
-    // Fail on error
-    if status != (gl::TRUE as GLint) {
-        let mut len = 65536;
-        gl::GetShaderiv(shader, gl::INFO_LOG_LENGTH, &mut len);
-        let mut buf = Vec::with_capacity(len as usize);
-        buf.set_len((len as usize) - 1); // subtract 1 to skip the trailing null character
-        let mut out_len: GLsizei = 0;
-        gl::GetShaderInfoLog(
-            shader,
-            65536,
-            &mut out_len,
-            buf.as_mut_ptr() as *mut GLchar,
-        );
-        panic!(
-            "{}",
-            str::from_utf8(&buf).expect("ShaderInfoLog not valid utf8")
-        );
-    }
-}}
+    let shader_sources = [
+        (glow::VERTEX_SHADER, vertex_shader_source),
+        (glow::FRAGMENT_SHADER, fragment_shader_source),
+    ];
 
-fn program_check_error(program: GLuint) { unsafe {
-    // Get the compile status
-    let mut status = gl::FALSE as GLint;
-    gl::GetProgramiv(program, gl::LINK_STATUS, &mut status);
+    let mut shaders = Vec::with_capacity(shader_sources.len());
 
-    // Fail on error
-    if status != (gl::TRUE as GLint) {
-        let mut len = 256;
-        gl::GetProgramiv(program, gl::INFO_LOG_LENGTH, &mut len);
-        let mut buf = Vec::with_capacity(len as usize);
-        buf.set_len((len as usize) - 1); // subtract 1 to skip the trailing null character
-        let mut out_len: GLsizei = 0;
-        gl::GetProgramInfoLog(
-            program,
-            256,
-            &mut out_len,
-            buf.as_mut_ptr() as *mut GLchar,
-        );
-        panic!(
-            "{}",
-            str::from_utf8(&buf).expect("ProgramInfoLog not valid utf8")
-        );
-    }
-}}
+    for (shader_type, shader_source) in shader_sources.iter() {
+        let shader = gl.create_shader(*shader_type).expect("Cannot create shader");
 
-pub fn compile_shader(src: &str, ty: GLenum) -> GLuint {
-    let shader;
-    unsafe {
-        // Create GLSL shaders
-        shader = gl::CreateShader(ty);
-        let err = gl::GetError();
+        gl.shader_source(shader, shader_source);
+        gl.compile_shader(shader);
 
-        if err != gl::NO_ERROR {
-            println!("OpenGL error: {:#x}", err)
+        if !gl.get_shader_compile_status(shader) {
+            panic!("{}", gl.get_shader_info_log(shader));
         }
-        // Attempt to compile the shader
-        let c_str = CString::new(src.as_bytes()).unwrap();
-        gl::ShaderSource(shader, 1, &c_str.as_ptr(), ptr::null());
-        gl::CompileShader(shader);
-        
-        shader_check_error(shader);
-    }
-    shader
-}
 
-pub fn link_program(vs: GLuint, fs: GLuint) -> GLuint {
-    unsafe {
-        let program = gl::CreateProgram();
-        gl::AttachShader(program, vs);
-        gl::AttachShader(program, fs);
-        gl::LinkProgram(program);
-
-        gl::DetachShader(program, fs);
-        gl::DetachShader(program, vs);
-        gl::DeleteShader(fs);
-        gl::DeleteShader(vs);
-        
-        // Fail on error
-        program_check_error(program);
-        
-        program
+        gl.attach_shader(program, shader);
+        shaders.push(shader);
     }
+
+    gl.link_program(program);
+
+    if !gl.get_program_link_status(program) {
+        panic!("{}", gl.get_program_info_log(program));
+    }
+
+    for shader in shaders {
+        gl.detach_shader(program, shader);
+        gl.delete_shader(shader);
+    }
+
+    program
 }
 
 fn add_quads(buffer: &mut Vec<TriangleType>, quads: Vec<[VertexType; 4]>) -> i32 {
@@ -213,18 +162,17 @@ fn add_sphere(buffer: &mut Vec<TriangleType>) -> i32 {
     triangle_count
 }
 
-fn c_str(str: &str) -> CString {
-    CString::new(str).unwrap()
+unsafe fn bytes_of<T>(val: &Vec<T>) -> &[u8] {
+    let size = size_of::<T>();
+    if size == 0 {
+        return &[];
+    }
+    unsafe { core::slice::from_raw_parts(val.as_ptr() as *const u8, size * val.len()) }
 }
 
 impl Graphics {
-    pub fn new() -> Self {
-        // Create Vertex Array Object
-        let mut vao = 0;
-        let mut vbo = 0;
-        let vs = compile_shader(VS_SRC, gl::VERTEX_SHADER);
-        let fs = compile_shader(FS_SRC, gl::FRAGMENT_SHADER);
-        let program = link_program(vs, fs);
+    pub fn new(gl: &glow::Context) -> Self {
+        let program = unsafe { create_program(gl, VS_SRC, FS_SRC) };
         
         let mut buffer = Vec::<TriangleType>::with_capacity(256);
 
@@ -232,96 +180,85 @@ impl Graphics {
         let translate = [0.0, -0.5, 0.0];
         
         let mut triangle_count = add_quads(&mut buffer, vec![[
-            (Vec3::<GLfloat>::from([-1.0, -1.0,  0.0,]).scale(scale) + translate, [-0.5, 0.0,],),
-            (Vec3::<GLfloat>::from([ 1.0, -1.0,  0.0,]).scale(scale) + translate, [ 0.5, 0.0,],),
-            (Vec3::<GLfloat>::from([ 1.0,  1.0,  0.0,]).scale(scale) + translate, [ 0.5, 1.0,],),
-            (Vec3::<GLfloat>::from([-1.0,  1.0,  0.0,]).scale(scale) + translate, [-0.5, 1.0,],),
+            (Vec3::<f32>::from([-1.0, -1.0,  0.0,]).scale(scale) + translate, [-0.5, 0.0,],),
+            (Vec3::<f32>::from([ 1.0, -1.0,  0.0,]).scale(scale) + translate, [ 0.5, 0.0,],),
+            (Vec3::<f32>::from([ 1.0,  1.0,  0.0,]).scale(scale) + translate, [ 0.5, 1.0,],),
+            (Vec3::<f32>::from([-1.0,  1.0,  0.0,]).scale(scale) + translate, [-0.5, 1.0,],),
         ]]);
         
         triangle_count += add_sphere(&mut buffer);
-        
+
+        let vao = unsafe { gl.create_vertex_array().unwrap() };
+        let vbo = unsafe { gl.create_buffer().unwrap() };
+
         unsafe {
-            gl::GenVertexArrays(1, &mut vao);
-            gl::GenBuffers(1, &mut vbo);
+            gl.bind_vertex_array(Some(vao));
 
-            // Create a VAO since the data is set up only once.
-            gl::BindVertexArray(vao);
+            gl.bind_buffer(glow::ARRAY_BUFFER, Some(vbo));
 
-            // Create a Vertex Buffer Object and copy the vertex data to it
-            gl::BindBuffer(gl::ARRAY_BUFFER, vbo);
-            gl::BufferData(
-                gl::ARRAY_BUFFER,
-                (buffer.len() * size_of::<TriangleType>()) as GLsizeiptr,
-                mem::transmute(buffer.as_ptr()),
-                gl::STATIC_DRAW,
-            );
+            gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, bytes_of(&buffer), glow::STATIC_DRAW);
 
-            // Specify the layout of the vertex data
-            let pos_attr = gl::GetAttribLocation(program, c_str("aPosition").as_ptr());
-            gl::EnableVertexAttribArray(pos_attr as GLuint);
-            gl::VertexAttribPointer(
-                pos_attr as GLuint,
+            let attr_loc = gl.get_attrib_location(program, "aPosition").unwrap();
+            gl.enable_vertex_attrib_array(attr_loc);
+            gl.vertex_attrib_pointer_f32(
+                attr_loc,
                 3,
-                gl::FLOAT,
-                gl::FALSE as GLboolean,
-                size_of::<VertexType>() as GLsizei,
-                ptr::null(),
+                glow::FLOAT,
+                false,
+                size_of::<VertexType>() as i32,
+                0,
             );
-            
-            let tex_attr = gl::GetAttribLocation(program, c_str("aTexCoord").as_ptr());
-            gl::EnableVertexAttribArray(tex_attr as GLuint);
-            gl::VertexAttribPointer(
-                tex_attr as GLuint,
+
+            let attr_loc = gl.get_attrib_location(program, "aTexCoord").unwrap();
+            gl.enable_vertex_attrib_array(attr_loc);
+            gl.vertex_attrib_pointer_f32(
+                attr_loc,
                 2,
-                gl::FLOAT,
-                gl::FALSE as GLboolean,
-                size_of::<VertexType>() as GLsizei,
-                (3 * size_of::<GLfloat>()) as *const GLvoid,
+                glow::FLOAT,
+                false,
+                size_of::<VertexType>() as i32,
+                (3 * size_of::<f32>()) as i32,
             );
             
-            gl::UseProgram(program);
-            
-            let tex_uniform = gl::GetUniformLocation(program, c_str("Texture0").as_ptr());
-            gl::Uniform1i(tex_uniform, 0);
-            
-            let tex_uniform = gl::GetUniformLocation(program, c_str("Texture1").as_ptr());
-            gl::Uniform1i(tex_uniform, 1);
+            gl.use_program(Some(program));
+
+            let tex_uniform = gl.get_uniform_location(program, "Texture0").unwrap();
+            gl.uniform_1_i32(Some(&tex_uniform), 0);
+
+            let tex_uniform = gl.get_uniform_location(program, "Texture1").unwrap();
+            gl.uniform_1_i32(Some(&tex_uniform), 1);
         }
 
         let transform_matrix_loc = unsafe { 
-            gl::GetUniformLocation(program, c_str("transformMatrix").as_ptr()) 
+            //gl.GetUniformLocation(program, c_str("transformMatrix").as_ptr())
+            gl.get_uniform_location(program, "transformMatrix").unwrap()
         };
         
         let textures = unsafe { [0, 1].map(|_| {
-            let mut texture = 0;
-            
-            gl::GenTextures(1, &mut texture);
+            let texture = gl.create_texture().unwrap();
 
-            gl::BindTexture(gl::TEXTURE_2D, texture);
+            gl.bind_texture(glow::TEXTURE_2D, Some(texture));
 
-            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S    , gl::REPEAT as i32);
-            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T    , gl::REPEAT as i32);
-            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST as i32);
-            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::NEAREST as i32);
+            gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S    , glow::REPEAT  as i32);
+            gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T    , glow::REPEAT  as i32);
+            gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::NEAREST as i32);
+            gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::NEAREST as i32);
 
-            gl::BindTexture(gl::TEXTURE_2D, 0);
-            
+            gl.bind_texture(glow::TEXTURE_2D, None);
+
             texture
         }) };
-        
+
         Graphics { program, vao, vbo, textures, transform_matrix_loc, triangle_count }
     }
 
-    pub fn draw(&self, phi: f32, theta: f32) {
+    pub fn draw(&self, gl: &glow::Context, phi: f32, theta: f32) {
         unsafe {
-            // Use the VAO created previously
-            gl::BindVertexArray(self.vao);
-            // Use shader program
-            gl::UseProgram(self.program);
+            gl.bind_vertex_array(Some(self.vao));
+            gl.use_program(Some(self.program));
+            gl.enable(glow::DEPTH_TEST);
 
-            gl::Enable(gl::DEPTH_TEST);
-
-            let mut matrix: [[GLfloat; 3]; 3] = [[0.0; 3]; 3];
+            let mut matrix: [[f32; 3]; 3] = [[0.0; 3]; 3];
             matrix[0][0] = 1.0;
             matrix[1][1] = 1.0;
             matrix[2][2] = 1.0;
@@ -333,17 +270,17 @@ impl Graphics {
                 Vector4::<f32>::new(0.0, 0.0, 0.0, 1.0),
             );
 
-            self.set_transform_matrix(matrix);
+            self.set_transform_matrix(gl, matrix);
 
-            gl::ActiveTexture(gl::TEXTURE0);
-            //gl::Enable(gl::TEXTURE_2D);
-            gl::BindTexture(gl::TEXTURE_2D, self.textures[0]);
+            gl.active_texture(glow::TEXTURE0);
+            //gl.Enable(gl.TEXTURE_2D);
+            gl.bind_texture(glow::TEXTURE_2D, Some(self.textures[0]));
 
-            gl::ActiveTexture(gl::TEXTURE1);
-            //gl::Enable(gl::TEXTURE_2D);
-            gl::BindTexture(gl::TEXTURE_2D, self.textures[1]);
+             gl.active_texture(glow::TEXTURE1);
+            //gl.Enable(gl.TEXTURE_2D);
+            gl.bind_texture(glow::TEXTURE_2D, Some(self.textures[1]));
 
-            gl::DrawArrays(gl::TRIANGLES, 0, 6);
+            gl.draw_arrays(glow::TRIANGLES, 0, 6);
 
             let phi = phi + FRAC_PI_2;
             
@@ -352,64 +289,70 @@ impl Graphics {
             let matrix = glm::ext::rotate(&matrix, -theta, Vector3::<f32>::new(1.0, 0.0, 0.0));
             let matrix = glm::ext::rotate(&matrix, phi, Vector3::<f32>::new(0.0, 1.0, 0.0));
             
-            self.set_transform_matrix(matrix);
+            self.set_transform_matrix(gl, matrix);
 
-            gl::DrawArrays(gl::TRIANGLES, 6, (self.triangle_count * 3) - 6);
+            gl.draw_arrays(glow::TRIANGLES, 6, (self.triangle_count * 3) - 6);
 
             // Unbind the VAO
-            gl::BindVertexArray(0);
+            gl.bind_vertex_array(None);
 
-            gl::BindTexture(gl::TEXTURE_2D, 0);
+            gl.bind_texture(glow::TEXTURE_2D, None);
 
-            let err = gl::GetError();
+            let err = gl.get_error();
 
-            if err != gl::NO_ERROR {
+            if err != glow::NO_ERROR {
                 println!("OpenGL error: {:#x}", err)
             }
         }
     }
 
-    pub fn update_texture(&mut self, data: [u8; 180 * 180 * 3], num: usize) {
+    pub fn update_texture(&mut self, gl: &glow::Context, data: [u8; 180 * 180 * 3], num: usize) {
         unsafe {
-            gl::BindTexture(gl::TEXTURE_2D, self.textures[num]);
+            gl.bind_texture(glow::TEXTURE_2D, Some(self.textures[num]));
 
-            gl::TexImage2D(
-                gl::TEXTURE_2D, 
+            gl.tex_image_2d(
+                glow::TEXTURE_2D,
                 0, 
-                gl::RGB8 as i32, 
+                glow::RGB8 as i32,
                 180, 180, 
                 0, 
-                gl::RGB, 
-                gl::UNSIGNED_BYTE, 
-                mem::transmute(&data)
+                glow::RGB,
+                glow::UNSIGNED_BYTE,
+                PixelUnpackData::Slice(Some(&data))
             );
 
-            gl::BindTexture(gl::TEXTURE_2D, 0);
+            gl.bind_texture(glow::TEXTURE_2D, None);
         }
     }
 
-    fn set_transform_matrix(&self, matrix: Matrix4<f32>) {
+    pub fn deinit(&mut self, gl: &glow::Context) {
         unsafe {
-            gl::UniformMatrix4fv(
-                self.transform_matrix_loc,
-                1,
-                gl::TRUE,
-                mem::transmute(&matrix),
-            );
-        }
-    }
-}
+            gl.delete_program(self.program);
+            gl.delete_buffer(self.vbo);
+            gl.delete_vertex_array(self.vao);
 
-impl Drop for Graphics {
-    fn drop(&mut self) {
-        unsafe {
-            gl::DeleteProgram(self.program);
-            gl::DeleteBuffers(1, &self.vbo);
-            gl::DeleteVertexArrays(1, &self.vao);
-            
             self.textures.iter().for_each(|texture| {
-                gl::DeleteTextures(1, texture);
+                gl.delete_texture(*texture);
             })
+        }
+    }
+
+    fn set_transform_matrix(&self, gl: &glow::Context, matrix: Matrix4<f32>) {
+        //let matrix: [f32] = matrix.as_array().iter().map(|arr| arr.as_array()).collect();
+
+        let matrix = [
+            matrix.c0.x, matrix.c0.y, matrix.c0.z, matrix.c0.w,
+            matrix.c1.x, matrix.c1.y, matrix.c1.z, matrix.c1.w,
+            matrix.c2.x, matrix.c2.y, matrix.c2.z, matrix.c2.w,
+            matrix.c3.x, matrix.c3.y, matrix.c3.z, matrix.c3.w,
+        ];
+
+        unsafe {
+            gl.uniform_matrix_4_f32_slice(
+                Some(&self.transform_matrix_loc),
+                true,
+                &matrix,
+            );
         }
     }
 }

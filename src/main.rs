@@ -20,11 +20,12 @@ use egui::mutex::RwLock;
 use egui::ViewportId;
 use egui_backend::egui::FullOutput;
 use egui_backend::sdl2::video::GLProfile;
-use egui_backend::{egui, gl, sdl2};
+use egui_backend::{egui, sdl2};
 use egui_backend::{sdl2::event::Event, DpiScaling, ShaderVersion};
 use egui_sdl2_gl as egui_backend;
+use glow::HasContext;
 use sdl2::mouse::MouseButton;
-use sdl2::video::{SwapInterval, Window};
+use sdl2::video::{GLContext, SwapInterval, Window};
 use sdl2::Sdl;
 use tiff::decoder::DecodingResult;
 
@@ -97,7 +98,7 @@ impl Mode {
     }
 }
 
-fn init_window(sdl_context: &Sdl) -> Window {
+fn init_window(sdl_context: &Sdl) -> (Window, glow::Context, GLContext) {
     let video_subsystem = sdl_context.video().unwrap();
     let gl_attr = video_subsystem.gl_attr();
     gl_attr.set_context_profile(GLProfile::Core);
@@ -122,7 +123,11 @@ fn init_window(sdl_context: &Sdl) -> Window {
         .build()
         .unwrap();
 
-    window
+    let _ctx = window.gl_create_context().unwrap();
+
+    let gl = unsafe { glow::Context::from_loader_function(|s| video_subsystem.gl_get_proc_address(s) as *const _) };
+
+    (window, gl, _ctx)
 }
 
 struct Data {
@@ -155,7 +160,7 @@ impl Data {
                     let yf = y as f32 - 90.0;
 
                     let torad = PI / 180.0;
-                    
+
                     let vector = to_cartesian(xf * torad, yf * torad);
 
                     vector
@@ -217,7 +222,7 @@ fn gen_threads(data: Arc<Data>) -> Vec<(Arc<DoubleBuffer<Buffer>>, JoinHandle<()
                         };
 
                         //let values = ((value * 2.0_f32.powf(exposure)) * 255.0) as u8;
-                        
+
                         let values = values.map(|value| ((value * 2.0_f32.powf(exposure)).powf(1.0 / 2.2) * 255.0) as u8);
 
                         buffer.get_mut()[(j * 180 + (i / THREAD_COUNT)) * 3 + 0] = values[0];
@@ -271,10 +276,8 @@ fn id_from_polar(phi: f32, theta: f32) -> (usize, usize) {
 fn main() {
     let sdl_context = sdl2::init().unwrap();
 
-    let window = init_window(&sdl_context);
-
-    // Create a window context
-    let _ctx = window.gl_create_context().unwrap();
+    let (window, gl, _ctx) = init_window(&sdl_context);
+    
     // debug_assert_eq!(gl_attr.context_profile(), GLProfile::Core);
     // debug_assert_eq!(gl_attr.context_version(), (3, 2));
 
@@ -302,7 +305,7 @@ fn main() {
 
     let threads = gen_threads(data.clone());
 
-    let mut triangle = graphics::Graphics::new();
+    let mut triangle = graphics::Graphics::new(&gl);
 
     let start_time = Instant::now();
 
@@ -315,18 +318,18 @@ fn main() {
         // First clear the background to something nice.
         unsafe {
             // Clear the screen to green
-            gl::ClearColor(0.0, 0.0, 0.0, 0.0);
-            gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
+            gl.clear_color(0.0, 0.0, 0.0, 0.0);
+            gl.clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);
         }
 
         threads.iter().enumerate().for_each(|(i, (buffer, _, _))| {
-            triangle.update_texture(***buffer, i);
+            triangle.update_texture(&gl, ***buffer, i);
         });
 
         let camera_polar = to_polar(*data.camera.read());
 
         // Then draw our triangle.
-        triangle.draw(camera_polar.0, camera_polar.1);
+        triangle.draw(&gl, camera_polar.0, camera_polar.1);
 
         let e_window = {
             let light = &data.light.write();
@@ -334,9 +337,9 @@ fn main() {
             let mut exposure = data.exposure.write();
             let mut mode = data.mode.write();
             let mouse = event_pump.mouse_state();
-            
+
             let (x, y) = (mouse.x(), window.size().1 as i32 - mouse.y());
-            
+
             let polar = polar_from_screen_coord(x, y, &window);
 
             egui::Window::new("Parameters").show(&egui_ctx, |ui| {
@@ -378,8 +381,8 @@ fn main() {
         } = egui_ctx.end_frame();
         // Process output
         egui_state.process_output(&window, &platform_output);
-        
-        unsafe { gl::Disable(gl::DEPTH_TEST) };
+
+        unsafe { gl.disable(glow::DEPTH_TEST) };
 
         let paint_jobs = egui_ctx.tessellate(shapes, pixels_per_point);
 
@@ -442,6 +445,8 @@ fn main() {
             render()
         });
     }
+    
+    triangle.deinit(&gl);
 
     //thread.join();
 }
