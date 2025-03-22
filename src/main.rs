@@ -194,6 +194,8 @@ fn gen_threads(data: Arc<Data>) -> Vec<(Arc<DoubleBuffer<Buffer>>, JoinHandle<()
                 let mode = *(data.mode.read());
                 let exposure = data.exposure.read().clone();
 
+                let mut buffer_w = buffer.get_mut();
+
                 //let mut tex: Box<[u8; 180 * 180 * 3]> = unsafe { Box::new(MaybeUninit::uninit().assume_init()) };
 
                 for j in 0..180 {
@@ -225,17 +227,13 @@ fn gen_threads(data: Arc<Data>) -> Vec<(Arc<DoubleBuffer<Buffer>>, JoinHandle<()
 
                         let values = values.map(|value| ((value * 2.0_f32.powf(exposure)).powf(1.0 / 2.2) * 255.0) as u8);
 
-                        buffer.get_mut()[(j * 180 + (i / THREAD_COUNT)) * 3 + 0] = values[0];
-                        buffer.get_mut()[(j * 180 + (i / THREAD_COUNT)) * 3 + 1] = values[1];
-                        buffer.get_mut()[(j * 180 + (i / THREAD_COUNT)) * 3 + 2] = values[2];
+                        buffer_w[(j * 180 + (i / THREAD_COUNT)) * 3 + 0] = values[0];
+                        buffer_w[(j * 180 + (i / THREAD_COUNT)) * 3 + 1] = values[1];
+                        buffer_w[(j * 180 + (i / THREAD_COUNT)) * 3 + 2] = values[2];
                     }
                 }
 
                 buffer.flip();
-
-                while !render.load(Ordering::Relaxed) {
-                    sleep(Duration::from_millis(1));
-                }
             }
         });
 
@@ -323,7 +321,9 @@ fn main() {
         }
 
         threads.iter().enumerate().for_each(|(i, (buffer, _, _))| {
-            triangle.update_texture(&gl, ***buffer, i);
+            if let Some(buffer) = buffer.read() {
+                triangle.update_texture(&gl, buffer.as_ref(), i);
+            }
         });
 
         let camera_polar = to_polar(*data.camera.read());

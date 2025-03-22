@@ -306,7 +306,7 @@ impl Graphics {
         }
     }
 
-    pub fn update_texture(&mut self, gl: &glow::Context, data: [u8; 180 * 180 * 3], num: usize) {
+    pub fn update_texture(&mut self, gl: &glow::Context, data: &[u8], num: usize) {
         unsafe {
             gl.bind_texture(glow::TEXTURE_2D, Some(self.textures[num]));
 
@@ -318,7 +318,7 @@ impl Graphics {
                 0, 
                 glow::RGB,
                 glow::UNSIGNED_BYTE,
-                PixelUnpackData::Slice(Some(&data))
+                PixelUnpackData::Slice(Some(data))
             );
 
             gl.bind_texture(glow::TEXTURE_2D, None);
