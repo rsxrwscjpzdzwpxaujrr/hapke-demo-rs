@@ -69,7 +69,7 @@ fn load_hapke<P: AsRef<Path>>(path: P) -> Box<[[HapkeParams; 180]; 360]> {
             pos += 9;
         }
     }
-    
+
     Box::new(data)
 }
 
@@ -86,8 +86,8 @@ fn load_hapke<P: AsRef<Path>>(path: P) -> Box<[[HapkeParams; 180]; 360]> {
 // }
 
 #[derive(PartialEq, Copy, Clone)]
-enum Mode { 
-    Lambert, 
+enum Mode {
+    Lambert,
     Hapke,
 }
 
@@ -137,10 +137,10 @@ struct Data {
 impl Data {
     fn new() -> Data {
         Data {
-            params: [ 
+            params: [
                 load_hapke("hapke_param_map_643nm.tif"),
                 load_hapke("hapke_param_map_566nm.tif"),
-                load_hapke("hapke_param_map_415nm.tif"), 
+                load_hapke("hapke_param_map_415nm.tif"),
             ],
             light: RwLock::new([-0.93847078, -0.32556817, 0.11522973].into()),
             camera: RwLock::new([-0.8171755, 0.22495106, -0.53068].into()),
@@ -241,14 +241,14 @@ fn gen_threads(data: Arc<Data>) -> Vec<(Arc<DoubleBuffer<Buffer>>, JoinHandle<()
 fn polar_from_screen_coord(x: i32, y: i32, window: &Window) -> Option<(f32, f32)> {
     let width: i32 = window.size().0 as i32;
     let height: i32 = window.size().1 as i32;
-    
+
     if y < height / 2 {
         let xusize = x / (width  / 360);
         let yusize = y / (height / 360);
-        
+
         if xusize < 0 || xusize > 360 {
             None
-        } 
+        }
         else if yusize < 0 || yusize > 180 {
             None
         }
@@ -293,13 +293,13 @@ fn main() {
     let mut event_pump: sdl2::EventPump = sdl_context.event_pump().unwrap();
 
     let mut quit = false;
-    
+
     let data = Arc::new(Data::new());
 
     //let mut tex: [[f32; 180]; 360] = [[0.5; 180]; 360];
-    
+
     //triangle.update_texture(&tex);
-    
+
     let threads = gen_threads(data.clone());
 
     let mut triangle = graphics::Graphics::new();
