@@ -1,10 +1,10 @@
-use crate::shader::Shader;
+use crate::shader::{Shader, ValueDebugger};
 use crate::vec3::Vec3;
 
 pub(crate) struct Lambert {}
 
 impl Shader<f32> for Lambert {
-    fn brdf(&self, light: &Vec3<f32>, normal: &Vec3<f32>, camera: &Vec3<f32>, albedo: &f32) -> f32 {
+    fn brdf(&self, light: &Vec3<f32>, normal: &Vec3<f32>, camera: &Vec3<f32>, albedo: &f32, debugger: Option<&ValueDebugger>) -> f32 {
         //normal.dot(&light.clone()).clamp(0.0, 1.0) * albedo
 
         // let i = f32::acos(light.mul(-1.0).dot(&normal.mul(1.0)));
@@ -23,6 +23,12 @@ impl Shader<f32> for Lambert {
             return 0.0;
         }
 
-        mu0 * albedo * 0.333
+        let result = mu0 * albedo * 0.333;
+
+        if let Some(debugger) = debugger {
+            debugger.assign_str(format!("Value: {}", result));
+        }
+        
+        result
     }
 }

@@ -1,5 +1,5 @@
 use std::f32::consts::PI;
-use crate::shader::Shader;
+use crate::shader::{Shader, ValueDebugger};
 use crate::vec3::Vec3;
 
 #[derive(Copy, Clone, Default)]
@@ -22,7 +22,7 @@ fn acos_clamped(x: f32) -> f32 {
 }
 
 impl Shader<HapkeParams> for Hapke {
-    fn brdf(&self, light: &Vec3<f32>, normal: &Vec3<f32>, camera: &Vec3<f32>, data: &HapkeParams) -> f32 {
+    fn brdf(&self, light: &Vec3<f32>, normal: &Vec3<f32>, camera: &Vec3<f32>, data: &HapkeParams, debugger: Option<&ValueDebugger>) -> f32 {
         //let K = -f32::ln(1.0 - (1.209 * data.phi.powf(2.0 / 3.0))) / data.phi.powf(2.0 / 3.0);
 
         if data.w == 0.0 {
@@ -100,6 +100,10 @@ impl Shader<HapkeParams> for Hapke {
         // let shadowing = if shadowing.is_normal() { shadowing } else { 1.0 };
 
         let result = ls * K * (data.w / 4.0) * (p * (1.0 + data.Bs0 * bs) + M) * (1.0 + data.Bc0 * compute_Bc(g, data.hc)) * shadowing;
+        
+        if let Some(debugger) = debugger {
+            debugger.assign_str(format!("Shadowing: {}\nValue: {}", shadowing, result));
+        }
 
         result
     }

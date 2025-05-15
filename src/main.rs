@@ -1,6 +1,6 @@
 use std::array::from_fn;
 use std::f32::consts::{FRAC_PI_4, FRAC_PI_2};
-use crate::shader::Shader;
+use crate::shader::{Shader, ValueDebugger};
 use std::f32::consts::PI;
 use std::fs::File;
 use std::ops::DerefMut;
@@ -137,6 +137,8 @@ struct Data {
     camera: RwLock<Vec3<f32>>,
     mode: RwLock<Mode>,
     exposure: RwLock<f32>,
+    cursor: RwLock<(f32, f32)>,
+    debug_str: RwLock<String>,
 }
 
 impl Data {
@@ -166,6 +168,8 @@ impl Data {
                     vector
                 })
             }),
+            cursor: RwLock::new((0.0f32, 0.0f32)),
+            debug_str: RwLock::new(String::default()),
         }
     }
 }
@@ -187,10 +191,14 @@ fn gen_threads(data: Arc<Data>) -> Vec<(Arc<DoubleBuffer<Buffer>>, JoinHandle<()
                 let params = &data.params;
                 let mode = *(data.mode.read());
                 let exposure = data.exposure.read().clone();
+                let cursor = data.cursor.read();
+                let mut debug_str = data.debug_str.write();
 
                 let mut buffer_w = buffer.get_mut();
 
                 //let mut tex: Box<[u8; 180 * 180 * 3]> = unsafe { Box::new(MaybeUninit::uninit().assume_init()) };
+
+                let debugger = ValueDebugger::default();
 
                 for j in 0..180 {
                     for i in (offset..360).step_by(THREAD_COUNT) {
@@ -198,21 +206,29 @@ fn gen_threads(data: Arc<Data>) -> Vec<(Arc<DoubleBuffer<Buffer>>, JoinHandle<()
                         let y = j;
 
                         let normal = &data.normals[x][y];
-                        //
+
+                        // IDK why we need PI here, I would love to get rid of it
+                        let cursor_id = id_from_polar(cursor.0 + PI, cursor.1);
+
+                        let our_debugger = if j == cursor_id.1 && i == cursor_id.0 {
+                            Some(&debugger)
+                        } else {
+                            None
+                        };
 
                         let values = match mode {
                             Mode::Lambert => {
                                 [
-                                    Lambert{}.brdf(&light, &normal, &camera, &params[0][x][y].w),
-                                    Lambert{}.brdf(&light, &normal, &camera, &params[1][x][y].w),
-                                    Lambert{}.brdf(&light, &normal, &camera, &params[2][x][y].w),
+                                    Lambert{}.brdf(&light, &normal, &camera, &params[0][x][y].w, our_debugger),
+                                    Lambert{}.brdf(&light, &normal, &camera, &params[1][x][y].w, None),
+                                    Lambert{}.brdf(&light, &normal, &camera, &params[2][x][y].w, None),
                                 ]
                             },
                             Mode::Hapke => {
                                 [
-                                    Hapke{}.brdf(&light, &normal, &camera, &params[0][x][y]),
-                                    Hapke{}.brdf(&light, &normal, &camera, &params[1][x][y]),
-                                    Hapke{}.brdf(&light, &normal, &camera, &params[2][x][y]),
+                                    Hapke{}.brdf(&light, &normal, &camera, &params[0][x][y], our_debugger),
+                                    Hapke{}.brdf(&light, &normal, &camera, &params[1][x][y], None),
+                                    Hapke{}.brdf(&light, &normal, &camera, &params[2][x][y], None),
                                 ]
                             },
                         };
@@ -228,6 +244,10 @@ fn gen_threads(data: Arc<Data>) -> Vec<(Arc<DoubleBuffer<Buffer>>, JoinHandle<()
                 }
 
                 buffer.flip();
+                
+                if !debugger.empty() {
+                    *debug_str.deref_mut() = debugger.get();
+                }
             }
         });
 
@@ -330,6 +350,7 @@ fn main() {
             let camera = &data.camera.write();
             let mut exposure = data.exposure.write();
             let mut mode = data.mode.write();
+            let debug_str = data.debug_str.read().clone();
             let mouse = event_pump.mouse_state();
 
             let (x, y) = (mouse.x(), window.size().1 as i32 - mouse.y());
@@ -352,6 +373,10 @@ fn main() {
                     ui.label(format!("Normal: {}", normal));
                 }
 
+                ui.label(" ");
+                
+                debug_str.lines().for_each(|line| { ui.label(line); });
+                    
                 ui.label(" ");
 
                 ui.label("Select shader:");
@@ -420,6 +445,9 @@ fn main() {
             let polar = polar_from_screen_coord(mouse.x(), window.size().1 as i32 - mouse.y(), &window);
 
             if let Some((phi, theta)) = polar {
+                let mut cursor = data.cursor.write();
+                *cursor.deref_mut() = (phi, theta);
+
                 let vector = -to_cartesian(phi, theta);
 
                 mouse.pressed_mouse_buttons().for_each(|button| {
