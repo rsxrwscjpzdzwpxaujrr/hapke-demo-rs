@@ -72,19 +72,20 @@ impl Shader<HapkeParams<f32x8>> for Hapke {
         let Ei = e12(tan_theta, i);
         let Ee = e12(tan_theta, e);
         
-        let phi = acos_clamped((camera.dot(light) - (mu * mu0)) / (f32x8::sin(e) * f32x8::sin(i)));
+        let phi = acos_clamped((camera.dot(light) - (mu * mu0)) / e.sin() * i.sin());
         //let phi = phi.clamp(0.0, FRAC_PI_2);
         
         //let phi = if phi.is_nan() { PI } else { phi };
         
         let temp_mask = i.cmp_le(e);
-        
-        let temp = (temp_mask.blend(((phi.cos() * Ee.1) + pow2((phi / 2.0).sin()) * Ei.1) / (2.0 - Ee.0 - ((phi / PI) * Ei.0)), 
-                                    (Ei.1               - pow2((phi / 2.0).sin()) * Ee.1) / (2.0 - Ei.0 - ((phi / PI) * Ee.0))),
-                    temp_mask.blend((Ee.1               - pow2((phi / 2.0).sin()) * Ei.1) / (2.0 - Ee.0 - ((phi / PI) * Ei.0)),
-                                    ((phi.cos() * Ei.1) + pow2((phi / 2.0).sin()) * Ee.1) / (2.0 - Ei.0 - ((phi / PI) * Ee.0))));
-        
-        
+
+        let temp = {(
+            temp_mask.blend(tmpfunc(phi.cos() ,  1.0, phi, Ei, Ee),
+                            tmpfunc(1.0.into(), -1.0, phi, Ee, Ei)),
+            temp_mask.blend(tmpfunc(1.0.into(), -1.0, phi, Ei, Ee),
+                            tmpfunc(phi.cos() ,  1.0, phi, Ee, Ei))
+        )};
+
         let x = 1.0 / (1.0 + (PI * pow2(tan_theta))).sqrt();
         
         let mu0_e = x * (mu0 + (i.sin() * tan_theta * temp.0));
@@ -97,15 +98,15 @@ impl Shader<HapkeParams<f32x8>> for Hapke {
         
         let p =
             ((1.0 + data.c) / 2.0) *
-                (1.0 - (data.b * data.b)) / (1.0 - (2.0 * data.b * f32x8::cos(g)) + pow2(data.b)).powf(3.0 / 2.0) +
+                (1.0 - (data.b * data.b)) / (1.0 - (2.0 * data.b * g.cos()) + pow2(data.b)).powf(3.0 / 2.0) +
                 ((1.0 - data.c) / 2.0) *
-                    (1.0 - (data.b * data.b)) / (1.0 + (2.0 * data.b * f32x8::cos(g)) + pow2(data.b)).powf(3.0 / 2.0);
+                    (1.0 - (data.b * data.b)) / (1.0 + (2.0 * data.b * g.cos()) + pow2(data.b)).powf(3.0 / 2.0);
         
-        let bs = 1.0 / (1.0 + (f32x8::tan(g / 2.0) / data.hs));
+        let bs = 1.0 / (1.0 + ((g / 2.0).tan() / data.hs));
         
         let M = (compute_H(mu0_e / K, f32x8::from(data.w)) * compute_H(mu_e / K, f32x8::from(data.w))) - 1.0;
         
-        let f = f32x8::exp(-2.0 * f32x8::tan(phi / 2.0));
+        let f = (-2.0 * (phi / 2.0).tan()).exp();
         
         //let f = if f == f32::INFINITY { 1.0 } else if f == f32::NEG_INFINITY { 0.0 } else {f};
         
@@ -137,8 +138,11 @@ impl Shader<HapkeParams<f32x8>> for Hapke {
         }
         
         result
-        // f32x8::from([0.0f32, 0.0f32, 0.0f32, 0.0f32])
     }
+}
+
+fn tmpfunc(x1: f32x8, x2: f32, phi: f32x8, Ea: (f32x8, f32x8), Eb: (f32x8, f32x8)) -> f32x8 {
+    ((x1 * Eb.1) + (pow2((phi / 2.0).sin()) * Ea.1) * x2) / (2.0 - Eb.0 - ((phi / PI) * Ea.0))
 }
 
 fn pow2(value: f32x8) -> f32x8 {
@@ -146,29 +150,29 @@ fn pow2(value: f32x8) -> f32x8 {
 }
 
 fn e12(tan_theta: f32x8, y: f32x8) -> (f32x8, f32x8) {
-    (f32x8::exp((-(2.0 / PI) * (1.0 / tan_theta) * (1.0 / f32x8::tan(y)))),
-     f32x8::exp((-(1.0 / PI) * f32x8::powf(1.0 / tan_theta, 2.0) * f32x8::powf(1.0 / f32x8::tan(y), 2.0))))
+    ((-(2.0 / PI) * (1.0 / tan_theta) * (1.0 / y.tan())).exp(),
+     (-(1.0 / PI) * pow2(1.0 / tan_theta) * pow2(1.0 / y.tan())).exp())
 }
 
 fn gh(x: f32x8, tan_theta: f32x8, y: f32x8) -> f32x8 {
     let e = e12(tan_theta, y);
 
-    x * (f32x8::cos(y) + (f32x8::sin(y) * tan_theta * (e.1 / (2.0 - e.0)))).abs()
+    x * (y.cos() + (y.sin() * tan_theta * (e.1 / (2.0 - e.0)))).abs()
 }
 
 fn compute_H(x: f32x8, ssa: f32x8) -> f32x8 {
-    let y = f32x8::sqrt(1.0 - ssa);
+    let y = (1.0 - ssa).sqrt();
 
     let r0 = (1.0 - y) / (1.0 + y);
 
-    let Hinv = 1.0 - (1.0 - y) * x * (r0 + (1.0 - 0.5 * r0 - r0 * x) * f32x8::ln((1.0 + x) / x));
+    let Hinv = 1.0 - (1.0 - y) * x * (r0 + (1.0 - 0.5 * r0 - r0 * x) * ((1.0 + x) / x).ln());
     1.0 / Hinv
 }
 
 fn compute_Bc(g: f32x8, hc: f32x8) -> f32x8 {
-    let zeta = f32x8::ln(f32x8::tan(g / 2.0)) / hc;
+    let zeta = (g / 2.0).tan().ln() / hc;
 
-    let result = (1.0 + (1.0 - f32x8::exp(-zeta)) / zeta) / (2.0 * f32x8::powf(1.0 + zeta, 2.0));
+    let result = (1.0 + (1.0 - (-zeta).exp()) / zeta) / (2.0 * pow2(1.0 + zeta));
     
     // if result.is_nan() {
     //     1.0
