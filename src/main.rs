@@ -1,5 +1,4 @@
 use std::array::from_fn;
-use std::f32::consts::{FRAC_PI_4, FRAC_PI_2};
 use crate::shader::{Shader, ValueDebugger};
 use std::f32::consts::PI;
 use std::fs::File;
@@ -28,6 +27,7 @@ use sdl2::mouse::MouseButton;
 use sdl2::video::{GLContext, SwapInterval, Window};
 use sdl2::Sdl;
 use tiff::decoder::DecodingResult;
+use wide::{f32x4, f32x8};
 
 mod graphics;
 //mod old;
@@ -41,7 +41,7 @@ mod vec3;
 const THREAD_COUNT: usize = 2;
 type Buffer = [u8; (360 / THREAD_COUNT) * 180 * 3];
 
-fn load_hapke<P: AsRef<Path>>(path: P) -> Box<[[HapkeParams; 180]; 360]> {
+fn load_hapke<P: AsRef<Path>>(path: P) -> Box<[[HapkeParams<f32>; 180]; 360]> {
     let f = File::open(path).unwrap();
     let mut decoder = tiff::decoder::Decoder::new(f).unwrap();
     let image = decoder.read_image().unwrap();
@@ -51,7 +51,7 @@ fn load_hapke<P: AsRef<Path>>(path: P) -> Box<[[HapkeParams; 180]; 360]> {
         _ => panic!(),
     };
 
-    let mut data: [[HapkeParams; 180]; 360] = [[HapkeParams::default(); 180]; 360];
+    let mut data: [[HapkeParams<f32>; 180]; 360] = [[HapkeParams::default(); 180]; 360];
 
     let mut pos = 0;
 
@@ -132,7 +132,7 @@ fn init_window(sdl_context: &Sdl) -> (Window, glow::Context, GLContext) {
 
 struct Data {
     normals: [[Vec3<f32>; 180]; 360],
-    params: [Box<[[HapkeParams; 180]; 360]>; 3],
+    params: [Box<[[HapkeParams<f32>; 180]; 360]>; 3],
     light: RwLock<Vec3<f32>>,
     camera: RwLock<Vec3<f32>>,
     mode: RwLock<Mode>,
@@ -200,46 +200,64 @@ fn gen_threads(data: Arc<Data>) -> Vec<(Arc<DoubleBuffer<Buffer>>, JoinHandle<()
 
                 let debugger = ValueDebugger::default();
 
-                for j in 0..180 {
-                    for i in (offset..360).step_by(THREAD_COUNT) {
-                        let x = i;
-                        let y = j;
+                let jbig = ((360) / THREAD_COUNT);
+                
+                let cursor_id = id_from_polar(cursor.0, cursor.1);
+                let cursor_id = ((cursor_id.0 + 180) % 360, cursor_id.1);
 
-                        let normal = &data.normals[x][y];
+                for k in (0..((180 * jbig * 3) - 2)).step_by(8) {
+                    let mut normalx8: Vec3<f32x8> = Default::default();
+                    
+                    let mut paramsx8: f32x8 = Default::default();
+                    let mut hapke_paramsx8: [HapkeParams<f32>; 8] = Default::default();
 
-                        // IDK why we need PI here, I would love to get rid of it
-                        let cursor_id = id_from_polar(cursor.0 + PI, cursor.1);
+                    let mut our_debuggerx8: [Option<&ValueDebugger>; 8] = Default::default();
+                    
+                    for l in 0..8 {
+                        let x = (((k + l) / 3) % jbig) * THREAD_COUNT + offset;
+                        let y = (k + l) / (jbig * 3);
 
-                        let our_debugger = if j == cursor_id.1 && i == cursor_id.0 {
+                        let channel = (k + l) % 3;
+
+                        normalx8.x.as_array_mut()[l] = data.normals[x][y].x;
+                        normalx8.y.as_array_mut()[l] = data.normals[x][y].y;
+                        normalx8.z.as_array_mut()[l] = data.normals[x][y].z;
+                        
+                        paramsx8.as_array_mut()[l] = params[channel][x][y].w;
+
+                        hapke_paramsx8[l] = params[channel][x][y];
+
+                        our_debuggerx8[l] = if x == cursor_id.0 && y == cursor_id.1 {
                             Some(&debugger)
                         } else {
                             None
                         };
+                    }
 
-                        let values = match mode {
-                            Mode::Lambert => {
-                                [
-                                    Lambert{}.brdf(&light, &normal, &camera, &params[0][x][y].w, our_debugger),
-                                    Lambert{}.brdf(&light, &normal, &camera, &params[1][x][y].w, None),
-                                    Lambert{}.brdf(&light, &normal, &camera, &params[2][x][y].w, None),
-                                ]
-                            },
-                            Mode::Hapke => {
-                                [
-                                    Hapke{}.brdf(&light, &normal, &camera, &params[0][x][y], our_debugger),
-                                    Hapke{}.brdf(&light, &normal, &camera, &params[1][x][y], None),
-                                    Hapke{}.brdf(&light, &normal, &camera, &params[2][x][y], None),
-                                ]
-                            },
-                        };
+                    let values = match mode {
+                        Mode::Lambert => {
+                            Lambert{}.brdf(
+                                &light.into(),
+                                &normalx8,
+                                &camera.into(),
+                                &paramsx8,
+                                our_debuggerx8)
+                        },
+                        Mode::Hapke => {
+                            Hapke{}.brdf(
+                                &light.into(),
+                                &normalx8,
+                                &camera.into(),
+                                &hapke_paramsx8.into(),
+                                our_debuggerx8)
+                        },
+                    };
 
-                        //let values = ((value * 2.0_f32.powf(exposure)) * 255.0) as u8;
+                    let test = values.to_array()
+                        .map(|value| ((value * 2.0_f32.powf(exposure)).powf(1.0 / 2.2) * 255.0) as u8);
 
-                        let values = values.map(|value| ((value * 2.0_f32.powf(exposure)).powf(1.0 / 2.2) * 255.0) as u8);
-
-                        buffer_w[(j * 180 + (i / THREAD_COUNT)) * 3 + 0] = values[0];
-                        buffer_w[(j * 180 + (i / THREAD_COUNT)) * 3 + 1] = values[1];
-                        buffer_w[(j * 180 + (i / THREAD_COUNT)) * 3 + 2] = values[2];
+                    for l in 0..8 {
+                        buffer_w[k + l] = test[l];
                     }
                 }
 

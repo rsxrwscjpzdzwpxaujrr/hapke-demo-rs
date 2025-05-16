@@ -1,4 +1,5 @@
 use std::cell::Cell;
+use wide::f32x8;
 use crate::vec3::Vec3;
 
 pub(crate) struct ValueDebugger {
@@ -33,10 +34,10 @@ impl ValueDebugger {
 pub(crate) trait Shader<T> {
     fn brdf(
         &self, 
-        light: &Vec3<f32>, 
-        normal: &Vec3<f32>, 
-        camera: &Vec3<f32>, 
+        light: &Vec3<f32x8>, 
+        normal: &Vec3<f32x8>, 
+        camera: &Vec3<f32x8>, 
         params: &T, 
-        debugger: Option<&ValueDebugger>
-    ) -> f32;
+        debugger: [Option<&ValueDebugger>; 8]
+    ) -> f32x8;
 }

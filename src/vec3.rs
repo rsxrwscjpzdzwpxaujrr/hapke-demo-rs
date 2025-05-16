@@ -1,5 +1,6 @@
 use std::fmt::{Debug, Display, Formatter};
 use std::ops::{Add, Index, Mul, Neg};
+use wide::{f32x4, f32x8};
 
 #[derive(Default, Debug, Copy, Clone)]
 pub(crate) struct Vec3<F: Copy + Mul<F, Output = F> + Add<F, Output = F>> {
@@ -101,5 +102,15 @@ impl<F: Copy + Mul<F, Output = F> + Add<F, Output = F> + Neg<Output = F>> Neg fo
 impl Display for Vec3<f32> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         (self.x, self.y, self.z).fmt(f)
+    }
+}
+
+impl From<Vec3<f32>> for Vec3<f32x8> {
+    fn from(value: Vec3<f32>) -> Self {
+        Self {
+            x: f32x8::from(value.x),
+            y: f32x8::from(value.y),
+            z: f32x8::from(value.z),
+        }
     }
 }
