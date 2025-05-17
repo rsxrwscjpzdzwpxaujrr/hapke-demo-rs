@@ -1,6 +1,6 @@
 use std::array::from_fn;
 use crate::shader::{Shader, ValueDebugger};
-use std::f32::consts::PI;
+use std::f32::consts::{FRAC_PI_3, FRAC_PI_6, PI};
 use std::fs::File;
 use std::ops::DerefMut;
 use std::path::Path;
@@ -139,6 +139,7 @@ struct Data {
     exposure: RwLock<f32>,
     cursor: RwLock<(f32, f32)>,
     debug_str: RwLock<String>,
+    normalized_albedo: RwLock<[[[f32; 3]; 180]; 360]>
 }
 
 impl Data {
@@ -170,6 +171,7 @@ impl Data {
             }),
             cursor: RwLock::new((0.0f32, 0.0f32)),
             debug_str: RwLock::new(String::default()),
+            normalized_albedo: RwLock::new([[Default::default(); 180]; 360])
         }
     }
 }
@@ -189,6 +191,7 @@ fn gen_threads(data: Arc<Data>) -> Vec<(Arc<DoubleBuffer<Buffer>>, JoinHandle<()
                 let light = data.light.read().clone();
                 let camera = data.camera.read().clone();
                 let params = &data.params;
+                let albedo = &data.normalized_albedo.read();
                 let mode = *(data.mode.read());
                 let exposure = data.exposure.read().clone();
                 let cursor = data.cursor.read();
@@ -223,7 +226,7 @@ fn gen_threads(data: Arc<Data>) -> Vec<(Arc<DoubleBuffer<Buffer>>, JoinHandle<()
                         normalx8.y.as_array_mut()[l] = data.normals[x][y].y;
                         normalx8.z.as_array_mut()[l] = data.normals[x][y].z;
                         
-                        paramsx8.as_array_mut()[l] = params[channel][x][y].w;
+                        paramsx8.as_array_mut()[l] = albedo[x][y][channel];
 
                         hapke_paramsx8[l] = params[channel][x][y];
 
@@ -303,6 +306,26 @@ fn id_from_polar(phi: f32, theta: f32) -> (usize, usize) {
     )
 }
 
+fn calculate_normalized_albedo(
+    buffer: &mut [[[f32; 3]; 180]; 360],
+    params: &[Box<[[HapkeParams<f32>; 180]; 360]>; 3],
+    i: f32, e: f32, g: f32
+) {
+    for k in 0..360 {
+        for j in 0..180 {
+            for channel in 0..3 {
+                buffer[k][j][channel] = Hapke{}.inner(
+                    f32x8::from(i.cos()).into(),
+                    f32x8::from(e.cos()).into(),
+                    f32x8::from(g.cos()).into(),
+                    &(HapkeParams::<f32x8>::from([params[channel][k][j]; 8])),
+                    [None; 8]
+                ).to_array()[0] / i.cos()
+            }
+        }
+    }
+}
+
 fn main() {
     let sdl_context = sdl2::init().unwrap();
 
@@ -328,6 +351,12 @@ fn main() {
     let mut quit = false;
 
     let data = Arc::new(Data::new());
+
+    let i = FRAC_PI_6;
+    let e = FRAC_PI_6;
+    let g = i + e;
+
+    calculate_normalized_albedo(data.normalized_albedo.write().deref_mut(), &data.params, i, e, g);
 
     //let mut tex: [[f32; 180]; 360] = [[0.5; 180]; 360];
 

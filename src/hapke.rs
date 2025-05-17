@@ -59,6 +59,12 @@ impl Shader<HapkeParams<f32x8>> for Hapke {
 
         let g_cos = camera.dot(light);
 
+        self.inner(mu0, mu, g_cos, data, debugger)
+    }
+}
+
+impl Hapke {
+    pub(crate) fn inner(&self, mu0: f32x8, mu: f32x8, g_cos: f32x8, data: &HapkeParams<f32x8>, debugger: [Option<&ValueDebugger>; 8]) -> f32x8 {
         let tan_theta = data.theta.to_radians().tan();
         let K = 1.0 - data.phi;
 
@@ -67,7 +73,7 @@ impl Shader<HapkeParams<f32x8>> for Hapke {
         let g = g_cos.acos();
 
         // Cosine of the azimuthal angle ψ
-        let psi_cos = (camera.dot(light) - (mu * mu0)) / (e.sin() * i.sin());
+        let psi_cos = (g_cos - (mu * mu0)) / (e.sin() * i.sin());
 
         // Phase function p(g), employed by Henyey-Greenstein double-lobed single particle phase
         // function

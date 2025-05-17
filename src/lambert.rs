@@ -27,7 +27,7 @@ impl Shader<f32x8> for Lambert {
             return f32x8::from(0.0);
         }
 
-        let result = mu0 * albedo * 0.333;
+        let result = mu0 * albedo;
 
         for i in 0..8 {
             if let Some(debugger) = debugger[i] {
