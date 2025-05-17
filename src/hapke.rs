@@ -66,13 +66,13 @@ impl Shader<HapkeParams<f32x8>> for Hapke {
         
         let i = PI - acos_clamped(light.dot(normal));
         let e = PI - acos_clamped(camera.dot(normal));
-        
         let g = acos_clamped(camera.dot(light));
+
+        let phi = acos_clamped((camera.dot(light) - (mu * mu0)) / (e.sin() * i.sin()));
         
         let Ei = e12(tan_theta, i);
         let Ee = e12(tan_theta, e);
         
-        let phi = acos_clamped((camera.dot(light) - (mu * mu0)) / e.sin() * i.sin());
         //let phi = phi.clamp(0.0, FRAC_PI_2);
         
         //let phi = if phi.is_nan() { PI } else { phi };
