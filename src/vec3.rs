@@ -20,7 +20,7 @@ pub(crate) struct Vec3<F: Copy + Mul<F, Output = F> + Add<F, Output = F>> {
 //         if value.len() != 3 {
 //             panic!("Incompatible array conversion")
 //         }
-//         
+//
 //         Point3f {
 //             x: value[0],
 //             y: value[1],

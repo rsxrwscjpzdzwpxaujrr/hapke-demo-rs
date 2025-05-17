@@ -9,9 +9,9 @@ pub(crate) struct ValueDebugger {
 
 impl Default for ValueDebugger {
     fn default() -> Self {
-        Self { 
+        Self {
             string: Default::default(),
-            empty: Cell::new(true),  
+            empty: Cell::new(true),
         }
     }
 }
@@ -25,7 +25,7 @@ impl ValueDebugger {
     pub(crate) fn get(self) -> String {
         self.string.into_inner()
     }
-    
+
     pub(crate) fn empty(&self) -> bool {
         self.empty.get()
     }
@@ -33,11 +33,11 @@ impl ValueDebugger {
 
 pub(crate) trait Shader<T> {
     fn brdf(
-        &self, 
-        light: &Vec3<f32x8>, 
-        normal: &Vec3<f32x8>, 
-        camera: &Vec3<f32x8>, 
-        params: &T, 
+        &self,
+        light: &Vec3<f32x8>,
+        normal: &Vec3<f32x8>,
+        camera: &Vec3<f32x8>,
+        params: &T,
         debugger: [Option<&ValueDebugger>; 8]
     ) -> f32x8;
 }

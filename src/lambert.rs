@@ -11,10 +11,10 @@ impl Shader<f32x8> for Lambert {
         // let i = f32::acos(light.mul(-1.0).dot(&normal.mul(1.0)));
         // let e = f32::acos(camera.mul(-1.0).dot(&normal.mul(1.0)));
         // let g = f32::acos(camera.mul(-1.0).dot(&light.mul(-1.0)));
-        // 
+        //
         // let mu0 = f32::cos(i);
         // let mu = f32::cos(e);
-        // 
+        //
         // mu0 * albedo
 
         let mu = -camera.dot(normal);
@@ -39,7 +39,7 @@ impl Shader<f32x8> for Lambert {
                     ));
             }
         }
-        
+
         result
     }
 }

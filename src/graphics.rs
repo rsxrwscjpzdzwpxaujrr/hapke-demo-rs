@@ -94,14 +94,14 @@ unsafe fn create_program(
 
 fn add_quads(buffer: &mut Vec<TriangleType>, quads: Vec<[VertexType; 4]>) -> i32 {
     let triangle_count: i32 = quads.len() as i32 * 2;
-    
+
     quads.into_iter().for_each(|quad| {
         buffer.push([
             quad[0],
             quad[1],
             quad[2],
         ]);
-        
+
         buffer.push([
             quad[0],
             quad[2],
@@ -158,7 +158,7 @@ fn add_sphere(buffer: &mut Vec<TriangleType>) -> i32 {
             ]]);
         }
     }
-    
+
     triangle_count
 }
 
@@ -173,19 +173,19 @@ unsafe fn bytes_of<T>(val: &Vec<T>) -> &[u8] {
 impl Graphics {
     pub fn new(gl: &glow::Context) -> Self {
         let program = unsafe { create_program(gl, VS_SRC, FS_SRC) };
-        
+
         let mut buffer = Vec::<TriangleType>::with_capacity(256);
 
         let scale = [1.0, 0.5, 1.0];
         let translate = [0.0, -0.5, 0.0];
-        
+
         let mut triangle_count = add_quads(&mut buffer, vec![[
             (Vec3::<f32>::from([-1.0, -1.0,  0.0,]).scale(scale) + translate, [-0.5, 0.0,],),
             (Vec3::<f32>::from([ 1.0, -1.0,  0.0,]).scale(scale) + translate, [ 0.5, 0.0,],),
             (Vec3::<f32>::from([ 1.0,  1.0,  0.0,]).scale(scale) + translate, [ 0.5, 1.0,],),
             (Vec3::<f32>::from([-1.0,  1.0,  0.0,]).scale(scale) + translate, [-0.5, 1.0,],),
         ]]);
-        
+
         triangle_count += add_sphere(&mut buffer);
 
         let vao = unsafe { gl.create_vertex_array().unwrap() };
@@ -219,7 +219,7 @@ impl Graphics {
                 size_of::<VertexType>() as i32,
                 (3 * size_of::<f32>()) as i32,
             );
-            
+
             gl.use_program(Some(program));
 
             let tex_uniform = gl.get_uniform_location(program, "Texture0").unwrap();
@@ -229,11 +229,11 @@ impl Graphics {
             gl.uniform_1_i32(Some(&tex_uniform), 1);
         }
 
-        let transform_matrix_loc = unsafe { 
+        let transform_matrix_loc = unsafe {
             //gl.GetUniformLocation(program, c_str("transformMatrix").as_ptr())
             gl.get_uniform_location(program, "transformMatrix").unwrap()
         };
-        
+
         let textures = unsafe { [0, 1].map(|_| {
             let texture = gl.create_texture().unwrap();
 
@@ -283,12 +283,12 @@ impl Graphics {
             gl.draw_arrays(glow::TRIANGLES, 0, 6);
 
             let phi = phi + FRAC_PI_2;
-            
+
             let matrix = glm::ext::translate(&matrix, Vector3::<f32>::new(0.5, 0.5, 0.0));
             let matrix = glm::ext::scale(&matrix, Vector3::<f32>::new(0.5, 0.5, 0.5));
             let matrix = glm::ext::rotate(&matrix, -theta, Vector3::<f32>::new(1.0, 0.0, 0.0));
             let matrix = glm::ext::rotate(&matrix, phi, Vector3::<f32>::new(0.0, 1.0, 0.0));
-            
+
             self.set_transform_matrix(gl, matrix);
 
             gl.draw_arrays(glow::TRIANGLES, 6, (self.triangle_count * 3) - 6);
@@ -312,10 +312,10 @@ impl Graphics {
 
             gl.tex_image_2d(
                 glow::TEXTURE_2D,
-                0, 
+                0,
                 glow::RGB8 as i32,
-                180, 180, 
-                0, 
+                180, 180,
+                0,
                 glow::RGB,
                 glow::UNSIGNED_BYTE,
                 PixelUnpackData::Slice(Some(data))

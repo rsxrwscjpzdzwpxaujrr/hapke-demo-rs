@@ -204,18 +204,18 @@ fn gen_threads(data: Arc<Data>) -> Vec<(Arc<DoubleBuffer<Buffer>>, JoinHandle<()
                 let debugger = ValueDebugger::default();
 
                 let jbig = ((360) / THREAD_COUNT);
-                
+
                 let cursor_id = id_from_polar(cursor.0, cursor.1);
                 let cursor_id = ((cursor_id.0 + 180) % 360, cursor_id.1);
 
                 for k in (0..((180 * jbig * 3) - 2)).step_by(8) {
                     let mut normalx8: Vec3<f32x8> = Default::default();
-                    
+
                     let mut paramsx8: f32x8 = Default::default();
                     let mut hapke_paramsx8: [HapkeParams<f32>; 8] = Default::default();
 
                     let mut our_debuggerx8: [Option<&ValueDebugger>; 8] = Default::default();
-                    
+
                     for l in 0..8 {
                         let x = (((k + l) / 3) % jbig) * THREAD_COUNT + offset;
                         let y = (k + l) / (jbig * 3);
@@ -225,7 +225,7 @@ fn gen_threads(data: Arc<Data>) -> Vec<(Arc<DoubleBuffer<Buffer>>, JoinHandle<()
                         normalx8.x.as_array_mut()[l] = data.normals[x][y].x;
                         normalx8.y.as_array_mut()[l] = data.normals[x][y].y;
                         normalx8.z.as_array_mut()[l] = data.normals[x][y].z;
-                        
+
                         paramsx8.as_array_mut()[l] = albedo[x][y][channel];
 
                         hapke_paramsx8[l] = params[channel][x][y];
@@ -265,7 +265,7 @@ fn gen_threads(data: Arc<Data>) -> Vec<(Arc<DoubleBuffer<Buffer>>, JoinHandle<()
                 }
 
                 buffer.flip();
-                
+
                 if !debugger.empty() {
                     *debug_str.deref_mut() = debugger.get();
                 }
@@ -330,7 +330,7 @@ fn main() {
     let sdl_context = sdl2::init().unwrap();
 
     let (window, gl, _ctx) = init_window(&sdl_context);
-    
+
     // debug_assert_eq!(gl_attr.context_profile(), GLProfile::Core);
     // debug_assert_eq!(gl_attr.context_version(), (3, 2));
 
@@ -421,9 +421,9 @@ fn main() {
                 }
 
                 ui.label(" ");
-                
+
                 debug_str.lines().for_each(|line| { ui.label(line); });
-                    
+
                 ui.label(" ");
 
                 ui.label("Select shader:");
@@ -510,7 +510,7 @@ fn main() {
             }
         }
     }
-    
+
     triangle.deinit(&gl);
 
     //thread.join();
