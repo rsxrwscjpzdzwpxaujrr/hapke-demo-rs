@@ -31,7 +31,12 @@ impl Shader<f32x8> for Lambert {
 
         for i in 0..8 {
             if let Some(debugger) = debugger[i] {
-                debugger.assign_str(format!("Value: {}", result.as_array_ref()[i]));
+                debugger.assign_str(
+                    format!("μ: {:.5}\nμ₀: {:.5}\n\nValue: {}",
+                            mu.as_array_ref()[i],
+                            mu0.as_array_ref()[i],
+                            result.as_array_ref()[i]
+                    ));
             }
         }
         

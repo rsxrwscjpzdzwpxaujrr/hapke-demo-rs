@@ -127,12 +127,20 @@ impl Shader<HapkeParams<f32x8>> for Hapke {
         
         let result = ls * K * (data.w / 4.0) * (p * (1.0 + data.Bs0 * bs) + M) * (1.0 + data.Bc0 * compute_Bc(g, f32x8::from(data.hc))) * shadowing;
 
-        for i in 0..8 {
-            if let Some(debugger) = debugger[i] {
+        for j in 0..8 {
+            if let Some(debugger) = debugger[j] {
                 debugger.assign_str(
-                    format!("Shadowing: {}\nValue: {}", 
-                            shadowing.as_array_ref()[i], 
-                            result.as_array_ref()[i]
+                    format!("i: {:.3}°\ne: {:.3}°\ng: {:.3}°\nψ: {:.3}°\n\nμ: {:.5}\nμ₀: {:.5}\n\nμe: {:.5}\nμ₀e: {:.5}\n\nShadowing: {:.5}\n\nValue: {}",
+                            i.as_array_ref()[j].to_degrees(),
+                            e.as_array_ref()[j].to_degrees(),
+                            g.as_array_ref()[j].to_degrees(),
+                            phi.as_array_ref()[j].to_degrees(),
+                            mu.as_array_ref()[j],
+                            mu0.as_array_ref()[j],
+                            mu_e.as_array_ref()[j],
+                            mu0_e.as_array_ref()[j],
+                            shadowing.as_array_ref()[j],
+                            result.as_array_ref()[j]
                     ));
             }
         }
