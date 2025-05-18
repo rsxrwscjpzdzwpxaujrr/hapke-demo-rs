@@ -131,7 +131,7 @@ impl Hapke {
             * K
             * (data.w / 4.0)
             * (p * (1.0 + data.Bs0 * bs) + M)
-            * (1.0 + data.Bc0 * compute_Bc(g, data.hc))
+            // * (1.0 + data.Bc0 * compute_Bc(g, data.hc))
             * shadowing;
 
         for j in 0..8 {
