@@ -186,7 +186,7 @@ fn compute_H(x: f32x8, ssa: f32x8) -> f32x8 {
 }
 
 fn compute_Bc(g: f32x8, hc: f32x8) -> f32x8 {
-    let zeta = (g / 2.0).tan().ln() / hc;
+    let zeta = (g / 2.0).tan() / hc;
 
     let result = (1.0 + (1.0 - (-zeta).exp()) / zeta) / (2.0 * pow2(1.0 + zeta));
 
