@@ -1,3 +1,4 @@
+use crate::averager::Averager;
 use crate::shader::{Shader, ValueDebugger};
 use std::f32::consts::{FRAC_PI_3, FRAC_PI_6, PI};
 use std::fs::File;
@@ -36,6 +37,7 @@ mod lambert;
 mod hapke;
 mod utils;
 mod vec3;
+mod averager;
 
 const THREAD_COUNT: usize = 2;
 type Buffer = [u8; (360 / THREAD_COUNT) * 180 * 3];
@@ -138,7 +140,9 @@ struct Data {
     exposure: RwLock<f32>,
     cursor: RwLock<(f32, f32)>,
     debug_str: RwLock<String>,
-    normalized_albedo: RwLock<[[[f32; 3]; 180]; 360]>
+    normalized_albedo: RwLock<[[[f32; 3]; 180]; 360]>,
+    avg_time: Averager,
+    avg_calc_time: Averager,
 }
 
 impl Data {
@@ -170,7 +174,9 @@ impl Data {
             }),
             cursor: RwLock::new((0.0f32, 0.0f32)),
             debug_str: RwLock::new(String::default()),
-            normalized_albedo: RwLock::new([[Default::default(); 180]; 360])
+            normalized_albedo: RwLock::new([[Default::default(); 180]; 360]),
+            avg_time: Averager::new(Duration::from_secs_f32(0.5)),
+            avg_calc_time: Averager::new(Duration::from_secs_f32(0.5)),
         }
     }
 }
@@ -187,6 +193,9 @@ fn gen_threads(data: Arc<Data>) -> Vec<(Arc<DoubleBuffer<Buffer>>, JoinHandle<()
             let offset = thread_id;
 
             loop {
+                let start_time = Instant::now();
+                let mut calc_time = Duration::default();
+
                 let light = data.light.read().clone();
                 let camera = data.camera.read().clone();
                 let params = &data.params;
@@ -241,6 +250,8 @@ fn gen_threads(data: Arc<Data>) -> Vec<(Arc<DoubleBuffer<Buffer>>, JoinHandle<()
                     let hapke_paramsx8: [HapkeParams<f32x8>; CHANNELS] =
                         hapke_paramsx8.map(|value| value.into());
 
+                    let start_time = Instant::now();
+
                     let values: [f32x8; CHANNELS] = match mode {
                         Mode::Lambert => {
                             Lambert{}.brdf(
@@ -260,6 +271,8 @@ fn gen_threads(data: Arc<Data>) -> Vec<(Arc<DoubleBuffer<Buffer>>, JoinHandle<()
                         },
                     };
 
+                    calc_time += start_time.elapsed();
+
                     let test = values.map(|value|
                         value
                             .to_array()
@@ -273,6 +286,9 @@ fn gen_threads(data: Arc<Data>) -> Vec<(Arc<DoubleBuffer<Buffer>>, JoinHandle<()
                         }
                     }
                 }
+
+                data.avg_time.add_measurement(start_time.elapsed().as_secs_f32());
+                data.avg_calc_time.add_measurement(calc_time.as_secs_f32());
 
                 buffer.flip();
 
@@ -435,6 +451,11 @@ fn main() {
                 ui.label(" ");
 
                 debug_str.lines().for_each(|line| { ui.label(line); });
+
+                ui.label(" ");
+
+                ui.label(format!("Time: {:.4} sec", data.avg_time.average()));
+                ui.label(format!("Calc time: {:.4} sec", data.avg_calc_time.average()));
 
                 ui.label(" ");
 
