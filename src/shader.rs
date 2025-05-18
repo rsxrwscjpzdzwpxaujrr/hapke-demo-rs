@@ -32,12 +32,12 @@ impl ValueDebugger {
 }
 
 pub(crate) trait Shader<T> {
-    fn brdf(
+    fn brdf<const CHANNELS: usize>(
         &self,
         light: &Vec3<f32x8>,
         normal: &Vec3<f32x8>,
         camera: &Vec3<f32x8>,
-        params: &T,
+        params: [&T; CHANNELS],
         debugger: [Option<&ValueDebugger>; 8]
-    ) -> f32x8;
+    ) -> [f32x8; CHANNELS];
 }

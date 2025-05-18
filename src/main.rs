@@ -1,4 +1,3 @@
-use std::array::from_fn;
 use crate::shader::{Shader, ValueDebugger};
 use std::f32::consts::{FRAC_PI_3, FRAC_PI_6, PI};
 use std::fs::File;
@@ -6,7 +5,7 @@ use std::ops::DerefMut;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
-use std::thread;
+use std::{array, thread};
 use std::thread::{sleep, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -154,8 +153,8 @@ impl Data {
             camera: RwLock::new([-0.8171755, 0.22495106, -0.53068].into()),
             mode: RwLock::new(Mode::default()),
             exposure: RwLock::new(2.0),
-            normals: from_fn(|i| {
-                from_fn(|j| {
+            normals: array::from_fn(|i| {
+                array::from_fn(|j| {
                     let x = i;
                     let y = j;
 
@@ -203,32 +202,34 @@ fn gen_threads(data: Arc<Data>) -> Vec<(Arc<DoubleBuffer<Buffer>>, JoinHandle<()
 
                 let debugger = ValueDebugger::default();
 
-                let jbig = ((360) / THREAD_COUNT);
+                let jbig = (360) / THREAD_COUNT;
 
                 let cursor_id = id_from_polar(cursor.0, cursor.1);
                 let cursor_id = ((cursor_id.0 + 180) % 360, cursor_id.1);
 
-                for k in (0..((180 * jbig * 3) - 2)).step_by(8) {
+                const CHANNELS: usize = 3;
+
+                for k in (0..((180 * jbig) - 8)).step_by(8) {
                     let mut normalx8: Vec3<f32x8> = Default::default();
 
-                    let mut paramsx8: f32x8 = Default::default();
-                    let mut hapke_paramsx8: [HapkeParams<f32>; 8] = Default::default();
+                    let mut paramsx8: [f32x8; CHANNELS] = Default::default();
+                    let mut hapke_paramsx8: [[HapkeParams<f32>; 8]; CHANNELS] = Default::default();
 
                     let mut our_debuggerx8: [Option<&ValueDebugger>; 8] = Default::default();
 
                     for l in 0..8 {
-                        let x = (((k + l) / 3) % jbig) * THREAD_COUNT + offset;
-                        let y = (k + l) / (jbig * 3);
-
-                        let channel = (k + l) % 3;
+                        let x = ((k + l) % jbig) * THREAD_COUNT + offset;
+                        let y = (k + l) / jbig;
 
                         normalx8.x.as_array_mut()[l] = data.normals[x][y].x;
                         normalx8.y.as_array_mut()[l] = data.normals[x][y].y;
                         normalx8.z.as_array_mut()[l] = data.normals[x][y].z;
 
-                        paramsx8.as_array_mut()[l] = albedo[x][y][channel];
+                        for channel in 0..CHANNELS {
+                            paramsx8[channel].as_array_mut()[l] = albedo[x][y][channel];
 
-                        hapke_paramsx8[l] = params[channel][x][y];
+                            hapke_paramsx8[channel][l] = params[channel][x][y];
+                        }
 
                         our_debuggerx8[l] = if x == cursor_id.0 && y == cursor_id.1 {
                             Some(&debugger)
@@ -237,13 +238,16 @@ fn gen_threads(data: Arc<Data>) -> Vec<(Arc<DoubleBuffer<Buffer>>, JoinHandle<()
                         };
                     }
 
-                    let values = match mode {
+                    let hapke_paramsx8: [HapkeParams<f32x8>; CHANNELS] =
+                        hapke_paramsx8.map(|value| value.into());
+
+                    let values: [f32x8; CHANNELS] = match mode {
                         Mode::Lambert => {
                             Lambert{}.brdf(
                                 &light.into(),
                                 &normalx8,
                                 &camera.into(),
-                                &paramsx8,
+                                array::from_fn(|i| &paramsx8[i]),
                                 our_debuggerx8)
                         },
                         Mode::Hapke => {
@@ -251,16 +255,22 @@ fn gen_threads(data: Arc<Data>) -> Vec<(Arc<DoubleBuffer<Buffer>>, JoinHandle<()
                                 &light.into(),
                                 &normalx8,
                                 &camera.into(),
-                                &hapke_paramsx8.into(),
+                                array::from_fn(|i| &hapke_paramsx8[i]),
                                 our_debuggerx8)
                         },
                     };
 
-                    let test = values.to_array()
-                        .map(|value| ((value * 2.0_f32.powf(exposure)).powf(1.0 / 2.2) * 255.0) as u8);
+                    let test = values.map(|value|
+                        value
+                            .to_array()
+                            .map(|value|
+                                ((value * 2.0_f32.powf(exposure)).powf(1.0 / 2.2) * 255.0) as u8)
+                    );
 
                     for l in 0..8 {
-                        buffer_w[k + l] = test[l];
+                        for channel in 0..CHANNELS {
+                            buffer_w[((k + l) * 3) + channel] = test[channel][l];
+                        }
                     }
                 }
 
@@ -313,15 +323,17 @@ fn calculate_normalized_albedo(
 ) {
     for k in 0..360 {
         for j in 0..180 {
-            for channel in 0..3 {
-                buffer[k][j][channel] = Hapke{}.inner(
-                    f32x8::from(i.cos()).into(),
-                    f32x8::from(e.cos()).into(),
-                    f32x8::from(g.cos()).into(),
-                    &(HapkeParams::<f32x8>::from([params[channel][k][j]; 8])),
-                    [None; 8]
-                ).to_array()[0] / i.cos()
-            }
+            let params: [HapkeParams<f32x8>; 3] = array::from_fn(|i|
+                HapkeParams::<f32x8>::from([params[i][k][j]; 8])
+            );
+
+            buffer[k][j] = Hapke{}.inner(
+                f32x8::from(i.cos()).into(),
+                f32x8::from(e.cos()).into(),
+                f32x8::from(g.cos()).into(),
+                array::from_fn(|i| &params[i]),
+                [None; 8]
+            ).map(|value| value.to_array()[0] / i.cos())
         }
     }
 }
@@ -353,8 +365,8 @@ fn main() {
     let data = Arc::new(Data::new());
 
     let i = FRAC_PI_6;
-    let e = FRAC_PI_6;
-    let g = i + e;
+    let e = 0.001;
+    let g = FRAC_PI_6;
 
     calculate_normalized_albedo(data.normalized_albedo.write().deref_mut(), &data.params, i, e, g);
 
