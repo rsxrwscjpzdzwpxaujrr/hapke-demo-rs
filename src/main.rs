@@ -192,53 +192,85 @@ fn gen_threads(data: Arc<Data>) -> Vec<(Arc<DoubleBuffer<Buffer>>, JoinHandle<()
         let handle = thread::spawn(move || {
             let offset = thread_id;
 
+            const CHANNELS: usize = 3;
+            const WIDTH: usize = 360 / THREAD_COUNT;
+            const ARR_SIZE: usize = ((180 * WIDTH) - 8) / 8;
+
+            let (hapke_paramsx8, paramsx8, normalsx8): (
+                [[HapkeParams<f32x8>; ARR_SIZE]; CHANNELS],
+                [[f32x8; ARR_SIZE]; CHANNELS],
+                [Vec3<f32x8>; ARR_SIZE]
+            ) = {
+                let params = &data.params;
+                let albedo = &data.normalized_albedo.read();
+
+                (
+                    array::from_fn(|channel| array::from_fn(|k| {
+                        let k = k * 8;
+
+                        array::from_fn(|l| {
+                            let x = ((k + l) % WIDTH) * THREAD_COUNT + offset;
+                            let y = (k + l) / WIDTH;
+
+                            params[channel][x][y]
+                        }).into()
+                    })),
+
+                    array::from_fn(|channel| array::from_fn(|k| {
+                        let k = k * 8;
+
+                        array::from_fn(|l| {
+                            let x = ((k + l) % WIDTH) * THREAD_COUNT + offset;
+                            let y = (k + l) / WIDTH;
+
+                            albedo[x][y][channel]
+                        }).into()
+                    })),
+
+                    array::from_fn(|k| {
+                        let k = k * 8;
+
+                        let vecs: [Vec3<f32>; 8] = array::from_fn(|l| {
+                            let x = ((k + l) % WIDTH) * THREAD_COUNT + offset;
+                            let y = (k + l) / WIDTH;
+
+                            data.normals[x][y]
+                        });
+
+                        Vec3::<f32x8>::from([
+                            array::from_fn(|i| vecs[i].x).into(),
+                            array::from_fn(|i| vecs[i].y).into(),
+                            array::from_fn(|i| vecs[i].z).into()]
+                        )
+                    }),
+                )
+            };
+
             loop {
                 let start_time = Instant::now();
                 let mut calc_time = Duration::default();
 
                 let light = data.light.read().clone();
                 let camera = data.camera.read().clone();
-                let params = &data.params;
-                let albedo = &data.normalized_albedo.read();
                 let mode = *(data.mode.read());
                 let exposure = data.exposure.read().clone();
-                let cursor = data.cursor.read();
-                let mut debug_str = data.debug_str.write();
+                let cursor = data.cursor.read().clone();
 
                 let mut buffer_w = buffer.get_mut();
 
-                //let mut tex: Box<[u8; 180 * 180 * 3]> = unsafe { Box::new(MaybeUninit::uninit().assume_init()) };
+                let mut our_debuggerx8: [Option<&ValueDebugger>; 8] = Default::default();
 
                 let debugger = ValueDebugger::default();
-
-                let jbig = (360) / THREAD_COUNT;
 
                 let cursor_id = id_from_polar(cursor.0, cursor.1);
                 let cursor_id = ((cursor_id.0 + 180) % 360, cursor_id.1);
 
-                const CHANNELS: usize = 3;
+                let exposure = 2.0_f32.powf(exposure);
 
-                for k in (0..((180 * jbig) - 8)).step_by(8) {
-                    let mut normalx8: Vec3<f32x8> = Default::default();
-
-                    let mut paramsx8: [f32x8; CHANNELS] = Default::default();
-                    let mut hapke_paramsx8: [[HapkeParams<f32>; 8]; CHANNELS] = Default::default();
-
-                    let mut our_debuggerx8: [Option<&ValueDebugger>; 8] = Default::default();
-
+                for k in (0..((180 * WIDTH) - 8)).step_by(8) {
                     for l in 0..8 {
-                        let x = ((k + l) % jbig) * THREAD_COUNT + offset;
-                        let y = (k + l) / jbig;
-
-                        normalx8.x.as_array_mut()[l] = data.normals[x][y].x;
-                        normalx8.y.as_array_mut()[l] = data.normals[x][y].y;
-                        normalx8.z.as_array_mut()[l] = data.normals[x][y].z;
-
-                        for channel in 0..CHANNELS {
-                            paramsx8[channel].as_array_mut()[l] = albedo[x][y][channel];
-
-                            hapke_paramsx8[channel][l] = params[channel][x][y];
-                        }
+                        let x = ((k + l) % WIDTH) * THREAD_COUNT + offset;
+                        let y = (k + l) / WIDTH;
 
                         our_debuggerx8[l] = if x == cursor_id.0 && y == cursor_id.1 {
                             Some(&debugger)
@@ -247,54 +279,48 @@ fn gen_threads(data: Arc<Data>) -> Vec<(Arc<DoubleBuffer<Buffer>>, JoinHandle<()
                         };
                     }
 
-                    let hapke_paramsx8: [HapkeParams<f32x8>; CHANNELS] =
-                        hapke_paramsx8.map(|value| value.into());
-
                     let start_time = Instant::now();
 
                     let values: [f32x8; CHANNELS] = match mode {
                         Mode::Lambert => {
                             Lambert{}.brdf(
                                 &light.into(),
-                                &normalx8,
+                                &normalsx8[k / 8],
                                 &camera.into(),
-                                array::from_fn(|i| &paramsx8[i]),
+                                array::from_fn(|channel| &paramsx8[channel][k / 8]),
                                 our_debuggerx8)
                         },
                         Mode::Hapke => {
                             Hapke{}.brdf(
                                 &light.into(),
-                                &normalx8,
+                                &normalsx8[k / 8],
                                 &camera.into(),
-                                array::from_fn(|i| &hapke_paramsx8[i]),
+                                array::from_fn(|channel| &hapke_paramsx8[channel][k / 8]),
                                 our_debuggerx8)
                         },
                     };
 
                     calc_time += start_time.elapsed();
 
-                    let test = values.map(|value|
-                        value
-                            .to_array()
-                            .map(|value|
-                                ((value * 2.0_f32.powf(exposure)).powf(1.0 / 2.2) * 255.0) as u8)
+                    let values = values.map(|value|
+                        value.to_array().map(|value| ((value * exposure).powf(1.0 / 2.2) * 255.0))
                     );
 
                     for l in 0..8 {
                         for channel in 0..CHANNELS {
-                            buffer_w[((k + l) * 3) + channel] = test[channel][l];
+                            buffer_w[((k + l) * 3) + channel] = values[channel][l] as u8;
                         }
                     }
                 }
 
-                data.avg_time.add_measurement(start_time.elapsed().as_secs_f32());
-                data.avg_calc_time.add_measurement(calc_time.as_secs_f32());
-
                 buffer.flip();
 
                 if !debugger.empty() {
-                    *debug_str.deref_mut() = debugger.get();
+                    *data.debug_str.write() = debugger.get();
                 }
+
+                data.avg_time.add_measurement(start_time.elapsed().as_secs_f32());
+                data.avg_calc_time.add_measurement(calc_time.as_secs_f32());
             }
         });
 
