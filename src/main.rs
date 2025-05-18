@@ -52,7 +52,7 @@ fn load_hapke<P: AsRef<Path>>(path: P) -> Box<[[HapkeParams<f32>; 180]; 360]> {
         _ => panic!(),
     };
 
-    let mut data: [[HapkeParams<f32>; 180]; 360] = [[HapkeParams::default(); 180]; 360];
+    let mut data = Box::new([[HapkeParams::default(); 180]; 360]);
 
     let mut pos = 0;
 
@@ -72,7 +72,7 @@ fn load_hapke<P: AsRef<Path>>(path: P) -> Box<[[HapkeParams<f32>; 180]; 360]> {
         }
     }
 
-    Box::new(data)
+    data
 }
 
 // fn calc_normals() -> [[Array1<f32>; 180]; 360] {
