@@ -57,13 +57,13 @@ impl Shader<HapkeParams<f32x8>> for Hapke {
             }
         }
 
-        let mu0 = -light.dot(normal);
-        let mu = -camera.dot(normal);
+        let mu0 = (-light.dot(normal)).fast_max(0.0.into());
+        let mu = (-camera.dot(normal)).fast_max(0.0.into());
 
-        let mu_le_zero = mu.cmp_le(f32x8::from(0.0));
-        let mu0_le_zero = mu0.cmp_le(f32x8::from(0.0));
+        let mu_eq_zero = mu.cmp_eq(f32x8::from(0.0));
+        let mu0_eq_zero = mu0.cmp_eq(f32x8::from(0.0));
 
-        if (mu_le_zero | mu0_le_zero).all() {
+        if (mu_eq_zero | mu0_eq_zero).all() {
             return [f32x8::from(0.0); CHANNELS];
         }
 
