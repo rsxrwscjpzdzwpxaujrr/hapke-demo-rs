@@ -196,6 +196,13 @@ fn gen_threads(data: Arc<Data>) -> Vec<(Arc<DoubleBuffer<Buffer>>, JoinHandle<()
             const WIDTH: usize = 360 / THREAD_COUNT;
             const ARR_SIZE: usize = ((180 * WIDTH) - 8) / 8;
 
+            let get_coords = |id: usize| -> (usize, usize) {
+                let x = (id % WIDTH) * THREAD_COUNT + offset;
+                let y = id / WIDTH;
+
+                (x, y)
+            };
+
             let (hapke_paramsx8, paramsx8, normalsx8): (
                 [[HapkeParams<f32x8>; ARR_SIZE]; CHANNELS],
                 [[f32x8; ARR_SIZE]; CHANNELS],
@@ -205,34 +212,21 @@ fn gen_threads(data: Arc<Data>) -> Vec<(Arc<DoubleBuffer<Buffer>>, JoinHandle<()
                 let albedo = &data.normalized_albedo.read();
 
                 (
-                    array::from_fn(|channel| array::from_fn(|k| {
-                        let k = k * 8;
+                    array::from_fn(|channel| array::from_fn(|k| array::from_fn(|l| {
+                        let (x, y) = get_coords(k * 8 + l);
 
-                        array::from_fn(|l| {
-                            let x = ((k + l) % WIDTH) * THREAD_COUNT + offset;
-                            let y = (k + l) / WIDTH;
+                        params[channel][x][y]
+                    }).into())),
 
-                            params[channel][x][y]
-                        }).into()
-                    })),
+                    array::from_fn(|channel| array::from_fn(|k| array::from_fn(|l| {
+                        let (x, y) = get_coords(k * 8 + l);
 
-                    array::from_fn(|channel| array::from_fn(|k| {
-                        let k = k * 8;
-
-                        array::from_fn(|l| {
-                            let x = ((k + l) % WIDTH) * THREAD_COUNT + offset;
-                            let y = (k + l) / WIDTH;
-
-                            albedo[x][y][channel]
-                        }).into()
-                    })),
+                        albedo[x][y][channel]
+                    }).into())),
 
                     array::from_fn(|k| {
-                        let k = k * 8;
-
                         let vecs: [Vec3<f32>; 8] = array::from_fn(|l| {
-                            let x = ((k + l) % WIDTH) * THREAD_COUNT + offset;
-                            let y = (k + l) / WIDTH;
+                            let (x, y) = get_coords(k * 8 + l);
 
                             data.normals[x][y]
                         });
@@ -269,8 +263,7 @@ fn gen_threads(data: Arc<Data>) -> Vec<(Arc<DoubleBuffer<Buffer>>, JoinHandle<()
 
                 for k in (0..((180 * WIDTH) - 8)).step_by(8) {
                     for l in 0..8 {
-                        let x = ((k + l) % WIDTH) * THREAD_COUNT + offset;
-                        let y = (k + l) / WIDTH;
+                        let (x, y) = get_coords(k + l);
 
                         our_debuggerx8[l] = if x == cursor_id.0 && y == cursor_id.1 {
                             Some(&debugger)
