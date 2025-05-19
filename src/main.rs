@@ -28,6 +28,7 @@ use sdl2::video::{GLContext, SwapInterval, Window};
 use sdl2::Sdl;
 use tiff::decoder::DecodingResult;
 use wide::{f32x4, f32x8};
+use crate::oren_nayar::OrenNayar;
 
 mod graphics;
 //mod old;
@@ -38,6 +39,7 @@ mod hapke;
 mod utils;
 mod vec3;
 mod averager;
+mod oren_nayar;
 
 const THREAD_COUNT: usize = 2;
 type Buffer = [u8; (360 / THREAD_COUNT) * 180 * 3];
@@ -91,6 +93,7 @@ fn load_hapke<P: AsRef<Path>>(path: P) -> Box<[[HapkeParams<f32>; 180]; 360]> {
 enum Mode {
     Lambert,
     Hapke,
+    OrenNayar,
 }
 
 impl Mode {
@@ -291,6 +294,14 @@ fn gen_threads(data: Arc<Data>) -> Vec<(Arc<DoubleBuffer<Buffer>>, JoinHandle<()
                                 array::from_fn(|channel| &hapke_paramsx8[channel][k / 8]),
                                 our_debuggerx8)
                         },
+                        Mode::OrenNayar => {
+                            OrenNayar {}.brdf(
+                                &light.into(),
+                                &normalsx8[k / 8],
+                                &camera.into(),
+                                array::from_fn(|channel| &paramsx8[channel][k / 8]),
+                                our_debuggerx8)
+                        },
                     };
 
                     calc_time += start_time.elapsed();
@@ -481,6 +492,7 @@ fn main() {
                 ui.label("Select shader:");
                 ui.selectable_value(mode.deref_mut(), Mode::Lambert, "Lambert");
                 ui.selectable_value(mode.deref_mut(), Mode::Hapke, "Hapke");
+                ui.selectable_value(mode.deref_mut(), Mode::OrenNayar, "Oren-Nayar");
                 ui.label(" ");
                 if ui.button("Quit").clicked() {
                     quit = true;
