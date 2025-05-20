@@ -27,8 +27,8 @@ use sdl2::mouse::MouseButton;
 use sdl2::video::{GLContext, SwapInterval, Window};
 use sdl2::Sdl;
 use tiff::decoder::DecodingResult;
-use crate::oren_nayar::OrenNayar;
 use wide::f32x8;
+use crate::oren_nayar::{OrenNayar, OrenNayarParams};
 
 mod graphics;
 //mod old;
@@ -144,6 +144,7 @@ struct Data {
     cursor: RwLock<(f32, f32)>,
     debug_str: RwLock<String>,
     normalized_albedo: RwLock<[[[f32; 3]; 180]; 360]>,
+    on_params: RwLock<Box<[[[OrenNayarParams<f32>; 3]; 180]; 360]>>,
     avg_time: Averager,
     avg_calc_time: Averager,
 }
@@ -178,6 +179,7 @@ impl Data {
             cursor: RwLock::new((0.0f32, 0.0f32)),
             debug_str: RwLock::new(String::default()),
             normalized_albedo: RwLock::new([[Default::default(); 180]; 360]),
+            on_params: RwLock::new(Box::new([[Default::default(); 180]; 360])),
             avg_time: Averager::new(Duration::from_secs_f32(0.5)),
             avg_calc_time: Averager::new(Duration::from_secs_f32(0.5)),
         }
@@ -206,13 +208,15 @@ fn gen_threads(data: Arc<Data>) -> Vec<(Arc<DoubleBuffer<Buffer>>, JoinHandle<()
                 (x, y)
             };
 
-            let (hapke_paramsx8, paramsx8, normalsx8): (
+            let (hapke_paramsx8, paramsx8, onparamsx8, normalsx8): (
                 [[HapkeParams<f32x8>; ARR_SIZE]; CHANNELS],
                 [[f32x8; ARR_SIZE]; CHANNELS],
+                [[OrenNayarParams<f32x8>; ARR_SIZE]; CHANNELS],
                 [Vec3<f32x8>; ARR_SIZE]
             ) = {
                 let params = &data.params;
                 let albedo = &data.normalized_albedo.read();
+                let on_params = &data.on_params.read();
 
                 (
                     array::from_fn(|channel| array::from_fn(|k| array::from_fn(|l| {
@@ -225,6 +229,12 @@ fn gen_threads(data: Arc<Data>) -> Vec<(Arc<DoubleBuffer<Buffer>>, JoinHandle<()
                         let (x, y) = get_coords(k * 8 + l);
 
                         albedo[x][y][channel]
+                    }).into())),
+
+                    array::from_fn(|channel| array::from_fn(|k| array::from_fn(|l| {
+                        let (x, y) = get_coords(k * 8 + l);
+
+                        on_params[x][y][channel]
                     }).into())),
 
                     array::from_fn(|k| {
@@ -299,7 +309,7 @@ fn gen_threads(data: Arc<Data>) -> Vec<(Arc<DoubleBuffer<Buffer>>, JoinHandle<()
                                 &light.into(),
                                 &normalsx8[k / 8],
                                 &camera.into(),
-                                array::from_fn(|channel| &paramsx8[channel][k / 8]),
+                                array::from_fn(|channel| &onparamsx8[channel][k / 8]),
                                 our_debuggerx8)
                         },
                     };
@@ -399,6 +409,33 @@ fn calculate_normalized_albedo_map(
     }
 }
 
+fn calculate_onparam_map(
+    buffer: &mut [[[OrenNayarParams<f32>; 3]; 180]; 360],
+    params: &[Box<[[HapkeParams<f32>; 180]; 360]>; 3],
+    i: f32, e: f32, g: f32
+) {
+    for k in 0..360 {
+        for j in 0..180 {
+            let params: [HapkeParams<f32x8>; 3] = array::from_fn(|i|
+                HapkeParams::<f32x8>::from([params[i][k][j]; 8])
+            );
+
+            let (light, normal, camera) = from_spherical(i, e, g);
+
+            buffer[k][j] = Hapke{}.brdf_non_simd(
+                &light,
+                &normal,
+                &camera,
+                array::from_fn(|i| &params[i]),
+                None
+            ).map(|value| OrenNayarParams {
+                albedo: value * 1.3,
+                roughness: 0.55,
+            });
+        }
+    }
+}
+
 fn main() {
     let sdl_context = sdl2::init().unwrap();
 
@@ -430,6 +467,7 @@ fn main() {
     let g = FRAC_PI_6;
 
     calculate_normalized_albedo_map(data.normalized_albedo.write().deref_mut(), &data.params, i, e, g);
+    calculate_onparam_map(data.on_params.write().deref_mut(), &data.params, i, e, g);
 
     //let mut tex: [[f32; 180]; 360] = [[0.5; 180]; 360];
 
