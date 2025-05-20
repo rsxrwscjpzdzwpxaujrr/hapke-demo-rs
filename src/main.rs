@@ -27,8 +27,8 @@ use sdl2::mouse::MouseButton;
 use sdl2::video::{GLContext, SwapInterval, Window};
 use sdl2::Sdl;
 use tiff::decoder::DecodingResult;
-use wide::{f32x4, f32x8};
 use crate::oren_nayar::OrenNayar;
+use wide::f32x8;
 
 mod graphics;
 //mod old;
@@ -362,7 +362,18 @@ fn id_from_polar(phi: f32, theta: f32) -> (usize, usize) {
     )
 }
 
-fn calculate_normalized_albedo(
+fn from_spherical(i: f32, e: f32, g: f32) -> (Vec3<f32>, Vec3<f32>, Vec3<f32>) {
+    let x = (g.cos() - e.cos() * i.cos()) / i.sin();
+    let y = (e.sin() * e.sin() - x * x).sqrt();
+
+    let light: Vec3<f32> = [i.sin(), 0.0, i.cos()].into();
+    let normal: Vec3<f32> = [0.0, 0.0, -1.0].into();
+    let camera: Vec3<f32> = [x, y, e.cos()].into();
+
+    (light, normal, camera)
+}
+
+fn calculate_normalized_albedo_map(
     buffer: &mut [[[f32; 3]; 180]; 360],
     params: &[Box<[[HapkeParams<f32>; 180]; 360]>; 3],
     i: f32, e: f32, g: f32
@@ -373,13 +384,17 @@ fn calculate_normalized_albedo(
                 HapkeParams::<f32x8>::from([params[i][k][j]; 8])
             );
 
-            buffer[k][j] = Hapke{}.inner(
-                f32x8::from(i.cos()).into(),
-                f32x8::from(e.cos()).into(),
-                f32x8::from(g.cos()).into(),
+            let (light, normal, camera) = from_spherical(i, e, g);
+
+            let value = Hapke{}.brdf_non_simd(
+                &light,
+                &normal,
+                &camera,
                 array::from_fn(|i| &params[i]),
-                [None; 8]
-            ).map(|value| value.to_array()[0] / i.cos())
+                None
+            );
+
+            buffer[k][j] = value.map(|value| value / i.cos());
         }
     }
 }
@@ -414,7 +429,7 @@ fn main() {
     let e = 0.001;
     let g = FRAC_PI_6;
 
-    calculate_normalized_albedo(data.normalized_albedo.write().deref_mut(), &data.params, i, e, g);
+    calculate_normalized_albedo_map(data.normalized_albedo.write().deref_mut(), &data.params, i, e, g);
 
     //let mut tex: [[f32; 180]; 360] = [[0.5; 180]; 360];
 

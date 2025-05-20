@@ -1,3 +1,4 @@
+use std::array;
 use std::cell::Cell;
 use wide::f32x8;
 use crate::vec3::Vec3;
@@ -40,4 +41,21 @@ pub(crate) trait Shader<T> {
         params: [&T; CHANNELS],
         debugger: [Option<&ValueDebugger>; 8]
     ) -> [f32x8; CHANNELS];
+
+    fn brdf_non_simd<const CHANNELS: usize>(
+        &self,
+        light: &Vec3<f32>,
+        normal: &Vec3<f32>,
+        camera: &Vec3<f32>,
+        params: [&T; CHANNELS],
+        debugger: Option<&ValueDebugger>
+    ) -> [f32; CHANNELS] {
+        self.brdf(
+            &[light.x.into(), light.y.into(), light.z.into()].into(),
+            &[normal.x.into(), normal.y.into(), normal.z.into()].into(),
+            &[camera.x.into(), camera.y.into(), camera.z.into()].into(),
+            array::from_fn(|channel| params[channel]),
+            [debugger, None, None, None, None, None, None, None],
+        ).map(|value| value.as_array_ref()[0])
+    }
 }
