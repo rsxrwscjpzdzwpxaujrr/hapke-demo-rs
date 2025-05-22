@@ -18,15 +18,22 @@ impl From<[OrenNayarParams<f32>; 8]> for OrenNayarParams<f32x8> {
     }
 }
 
-pub(crate) struct OrenNayar {}
+pub(crate) struct OrenNayar<const CHANNELS: usize> {
+    params: [OrenNayarParams<f32x8>; CHANNELS],
+}
 
-impl Shader<OrenNayarParams<f32x8>> for OrenNayar {
-    fn brdf<const CHANNELS: usize>(
+impl<const CHANNELS: usize> Shader<OrenNayarParams<f32x8>, CHANNELS> for OrenNayar<CHANNELS> {
+    fn new(params: [OrenNayarParams<f32x8>; CHANNELS]) -> Self {
+        Self {
+            params
+        }
+    }
+
+    fn brdf(
         &self,
         light: &Vec3<f32x8>,
         normal: &Vec3<f32x8>,
         camera: &Vec3<f32x8>,
-        params: [&OrenNayarParams<f32x8>; CHANNELS],
         debugger: [Option<&ValueDebugger>; 8]
     ) -> [f32x8; CHANNELS] {
         let mu = -camera.dot(normal);
@@ -48,7 +55,7 @@ impl Shader<OrenNayarParams<f32x8>> for OrenNayar {
             normal.dot(light).max(normal.dot(camera)),
         );
 
-        let result = params.map(|params| {
+        let result = self.params.map(|params| {
             let a =              1.0 / (PI + (PI / 2.0 - 2.0 / 3.0) * params.roughness);
             let b = params.roughness / (PI + (PI / 2.0 - 2.0 / 3.0) * params.roughness);
 
@@ -61,7 +68,7 @@ impl Shader<OrenNayarParams<f32x8>> for OrenNayar {
                     format!("μ: {:.5}\nμ₀: {:.5}\n\nRougness: {:.5}\ns: {:.5}\nt: {:.5}\n\nValue: {}",
                             mu.as_array_ref()[i],
                             mu0.as_array_ref()[i],
-                            params[0].roughness.as_array_ref()[i],
+                            self.params[0].roughness.as_array_ref()[i],
                             s.as_array_ref()[i],
                             t.as_array_ref()[i],
                             result[0].as_array_ref()[i]

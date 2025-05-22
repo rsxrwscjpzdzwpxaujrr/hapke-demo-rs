@@ -34,24 +34,31 @@ impl From<[HapkeParams<f32>; 8]> for HapkeParams<f32x8> {
     }
 }
 
-pub(crate) struct Hapke {}
+pub(crate) struct Hapke<const CHANNELS: usize> {
+    params: [HapkeParams<f32x8>; CHANNELS],
+}
 
 fn acos_clamped(x: f32x8) -> f32x8 {
     x.fast_max(f32x8::from(-1.0)).fast_min(f32x8::from(1.0)).acos()
 }
 
-impl Shader<HapkeParams<f32x8>> for Hapke {
-    fn brdf<const CHANNELS: usize>(
+impl<const CHANNELS: usize> Shader<HapkeParams<f32x8>, CHANNELS> for Hapke<CHANNELS> {
+    fn new(params: [HapkeParams<f32x8>; CHANNELS]) -> Self {
+        Self {
+            params
+        }
+    }
+
+    fn brdf(
         &self,
         light: &Vec3<f32x8>,
         normal: &Vec3<f32x8>,
         camera: &Vec3<f32x8>,
-        data: [&HapkeParams<f32x8>; CHANNELS],
         debugger: [Option<&ValueDebugger>; 8]
     ) -> [f32x8; CHANNELS] {
         //let K = -f32::ln(1.0 - (1.209 * data.phi.powf(2.0 / 3.0))) / data.phi.powf(2.0 / 3.0);
 
-        for data in data {
+        for data in self.params {
             if data.w.cmp_eq(0.0).all() {
                 return [f32x8::from(0.0); CHANNELS];
             }
@@ -69,21 +76,20 @@ impl Shader<HapkeParams<f32x8>> for Hapke {
 
         let g_cos = camera.dot(light);
 
-        self.inner(mu0, mu, g_cos, data, debugger)
+        self.inner(mu0, mu, g_cos, debugger)
     }
 }
 
-impl Hapke {
-    pub(crate) fn inner<const CHANNELS: usize>(
+impl<const CHANNELS: usize> Hapke<CHANNELS> {
+    pub(crate) fn inner(
         &self,
         mu0: f32x8,
         mu: f32x8,
         g_cos: f32x8,
-        data: [&HapkeParams<f32x8>; CHANNELS],
         debugger: [Option<&ValueDebugger>; 8]
     ) -> [f32x8; CHANNELS] {
-        let tan_theta = data[0].theta.to_radians().tan();
-        let K = 1.0 - data[0].phi;
+        let tan_theta = self.params[0].theta.to_radians().tan();
+        let K = 1.0 - self.params[0].phi;
 
         let i = mu0.acos();
         let e = mu.acos();
@@ -94,14 +100,14 @@ impl Hapke {
 
         // Phase function p(g), employed by Henyey-Greenstein double-lobed single particle phase
         // function
-        let p = data.map(|data| ((1.0 + data.c) / 2.0)
+        let p = self.params.map(|data| ((1.0 + data.c) / 2.0)
             * (1.0 - pow2(data.b))
             / (1.0 - (2.0 * data.b * g_cos) + pow2(data.b)).powf(3.0 / 2.0)
             + ((1.0 - data.c) / 2.0)
             * (1.0 - pow2(data.b))
             / (1.0 + (2.0 * data.b * g_cos) + pow2(data.b)).powf(3.0 / 2.0));
 
-        let bs = data.map(|data| 1.0 / (1.0 + ((g / 2.0).tan() / data.hs)));
+        let bs = self.params.map(|data| 1.0 / (1.0 + ((g / 2.0).tan() / data.hs)));
 
         // Average cosine of the surface tilt angle
         let chi = 1.0 / (1.0 + (PI * pow2(tan_theta))).sqrt();
@@ -142,9 +148,12 @@ impl Hapke {
         // Lommel-Seeliger
         let ls = mu0_e / (mu_e + mu0_e);
 
-        let M = data.map(|data| (compute_H(mu0_e / K, data.w) * compute_H(mu_e / K, data.w)) - 1.0);
+        let M = self.params.map(|data|
+            (compute_H(mu0_e / K, data.w) * compute_H(mu_e / K, data.w)) - 1.0
+        );
 
-        let result = array::from_fn(|i| (data[i], p[i], bs[i], M[i])).map(|(data, p, bs, M)| ls
+        let result = array::from_fn(|i| (self.params[i], p[i], bs[i], M[i])).map(|(data, p, bs, M)|
+            ls
             * K
             * (data.w / 4.0)
             * (p * (1.0 + data.Bs0 * bs) + M)

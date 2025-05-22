@@ -289,27 +289,36 @@ fn gen_threads(data: Arc<Data>) -> Vec<(Arc<DoubleBuffer<Buffer>>, JoinHandle<()
 
                     let values: [f32x8; CHANNELS] = match mode {
                         Mode::Lambert => {
-                            Lambert{}.brdf(
+                            let shader = Lambert::new(array::from_fn(|channel|
+                                paramsx8[channel][k / 8])
+                            );
+
+                            shader.brdf(
                                 &light.into(),
                                 &normalsx8[k / 8],
                                 &camera.into(),
-                                array::from_fn(|channel| &paramsx8[channel][k / 8]),
                                 our_debuggerx8)
                         },
                         Mode::Hapke => {
-                            Hapke{}.brdf(
+                            let shader = Hapke::new(array::from_fn(|channel|
+                                hapke_paramsx8[channel][k / 8])
+                            );
+
+                            shader.brdf(
                                 &light.into(),
                                 &normalsx8[k / 8],
                                 &camera.into(),
-                                array::from_fn(|channel| &hapke_paramsx8[channel][k / 8]),
                                 our_debuggerx8)
                         },
                         Mode::OrenNayar => {
-                            OrenNayar {}.brdf(
+                            let shader = OrenNayar::new(array::from_fn(|channel|
+                                onparamsx8[channel][k / 8])
+                            );
+
+                            shader.brdf(
                                 &light.into(),
                                 &normalsx8[k / 8],
                                 &camera.into(),
-                                array::from_fn(|channel| &onparamsx8[channel][k / 8]),
                                 our_debuggerx8)
                         },
                     };
@@ -390,17 +399,16 @@ fn calculate_normalized_albedo_map(
 ) {
     for k in 0..360 {
         for j in 0..180 {
-            let params: [HapkeParams<f32x8>; 3] = array::from_fn(|i|
+            let shader = Hapke::new(array::from_fn(|i|
                 HapkeParams::<f32x8>::from([params[i][k][j]; 8])
-            );
+            ));
 
             let (light, normal, camera) = from_spherical(i, e, g);
 
-            let value = Hapke{}.brdf_non_simd(
+            let value = shader.brdf_non_simd(
                 &light,
                 &normal,
                 &camera,
-                array::from_fn(|i| &params[i]),
                 None
             );
 
@@ -416,17 +424,16 @@ fn calculate_onparam_map(
 ) {
     for k in 0..360 {
         for j in 0..180 {
-            let params: [HapkeParams<f32x8>; 3] = array::from_fn(|i|
+            let shader = Hapke::new(array::from_fn(|i|
                 HapkeParams::<f32x8>::from([params[i][k][j]; 8])
-            );
+            ));
 
             let (light, normal, camera) = from_spherical(i, e, g);
 
-            buffer[k][j] = Hapke{}.brdf_non_simd(
+            buffer[k][j] = shader.brdf_non_simd(
                 &light,
                 &normal,
                 &camera,
-                array::from_fn(|i| &params[i]),
                 None
             ).map(|value| OrenNayarParams {
                 albedo: value * 1.3,
