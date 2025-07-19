@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 sdl2 = "0.37.0"
-tiff = { git = "https://github.com/image-rs/image-tiff", rev = "36f7b3b" }
+tiff = "0.10.0"
 egui = "0.31.1"
 egui_sdl2_gl = "0.31.0"
 glm = "0.2.3"
