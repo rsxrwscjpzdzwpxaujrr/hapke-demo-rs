@@ -44,7 +44,7 @@ mod oren_nayar;
 const THREAD_COUNT: usize = 2;
 type Buffer = [u8; (360 / THREAD_COUNT) * 180 * 3];
 
-fn load_hapke<P: AsRef<Path>>(path: P) -> Box<[[HapkeParams<f32>; 180]; 360]> {
+fn load_hapke<P: AsRef<Path>>(path: P) -> Vec<HapkeParams<f32>> {
     let f = File::open(path).unwrap();
     let mut decoder = tiff::decoder::Decoder::new(f).unwrap();
     let image = decoder.read_image().unwrap();
@@ -54,23 +54,29 @@ fn load_hapke<P: AsRef<Path>>(path: P) -> Box<[[HapkeParams<f32>; 180]; 360]> {
         _ => panic!(),
     };
 
-    let mut data = Box::new([[HapkeParams::default(); 180]; 360]);
+    let mut data: Vec<HapkeParams<f32>> = Vec::with_capacity(360 * 180);
 
     let mut pos = 0;
 
-    for j in (20..160).rev() {
-        for i in 0..data.len() {
-            data[i][j].w = image_data[pos + 0];
-            data[i][j].b = image_data[pos + 1];
-            data[i][j].c = image_data[pos + 2];
-            data[i][j].Bc0 = image_data[pos + 3];
-            data[i][j].hc = image_data[pos + 4];
-            data[i][j].Bs0 = image_data[pos + 5];
-            data[i][j].hs = image_data[pos + 6];
-            data[i][j].theta = image_data[pos + 7];
-            data[i][j].phi = image_data[pos + 8];
+    for row in (0..180).rev() {
+        for _column in 0..360 {
+            let mut param = HapkeParams::default();
 
-            pos += 9;
+            if row >= 20 && row < 160 {
+                param.w = image_data[pos + 0];
+                param.b = image_data[pos + 1];
+                param.c = image_data[pos + 2];
+                param.Bc0 = image_data[pos + 3];
+                param.hc = image_data[pos + 4];
+                param.Bs0 = image_data[pos + 5];
+                param.hs = image_data[pos + 6];
+                param.theta = image_data[pos + 7];
+                param.phi = image_data[pos + 8];
+
+                pos += 9;
+            }
+
+            data.push(param);
         }
     }
 
@@ -135,23 +141,23 @@ fn init_window(sdl_context: &Sdl) -> (Window, glow::Context, GLContext) {
 }
 
 struct Data {
-    normals: [[Vec3<f32>; 180]; 360],
-    params: [Box<[[HapkeParams<f32>; 180]; 360]>; 3],
+    normals: Vec<Vec3<f32>>,
+    params: [Vec<HapkeParams<f32>>; 3],
     light: RwLock<Vec3<f32>>,
     camera: RwLock<Vec3<f32>>,
     mode: RwLock<Mode>,
     exposure: RwLock<f32>,
     cursor: RwLock<(f32, f32)>,
     debug_str: RwLock<String>,
-    normalized_albedo: RwLock<[[[f32; 3]; 180]; 360]>,
-    on_params: RwLock<Box<[[[OrenNayarParams<f32>; 3]; 180]; 360]>>,
+    normalized_albedo: RwLock<Vec<[f32; 3]>>,
+    on_params: RwLock<Vec<[OrenNayarParams<f32>; 3]>>,
     avg_time: Averager,
     avg_calc_time: Averager,
 }
 
 impl Data {
     fn new() -> Data {
-        Data {
+        let mut data = Data {
             params: [
                 load_hapke("hapke_param_map_643nm.tif"),
                 load_hapke("hapke_param_map_566nm.tif"),
@@ -161,28 +167,32 @@ impl Data {
             camera: RwLock::new([-0.8171755, 0.22495106, -0.53068].into()),
             mode: RwLock::new(Mode::default()),
             exposure: RwLock::new(2.0),
-            normals: array::from_fn(|i| {
-                array::from_fn(|j| {
-                    let x = i;
-                    let y = j;
-
-                    let xf = x as f32;
-                    let yf = y as f32 - 90.0;
-
-                    let torad = PI / 180.0;
-
-                    let vector = to_cartesian(xf * torad, yf * torad);
-
-                    vector
-                })
-            }),
+            normals: Vec::with_capacity(360 * 180),
             cursor: RwLock::new((0.0f32, 0.0f32)),
             debug_str: RwLock::new(String::default()),
-            normalized_albedo: RwLock::new([[Default::default(); 180]; 360]),
-            on_params: RwLock::new(Box::new([[Default::default(); 180]; 360])),
+            normalized_albedo: RwLock::new(Vec::with_capacity(360 * 180)),
+            on_params: RwLock::new(Vec::with_capacity(360 * 180)),
             avg_time: Averager::new(Duration::from_secs_f32(0.5)),
             avg_calc_time: Averager::new(Duration::from_secs_f32(0.5)),
+        };
+
+        for row in 0..180 {
+            for column in 0..360 {
+                let x = column;
+                let y = row;
+
+                let xf = x as f32;
+                let yf = y as f32 - 90.0;
+
+                let torad = PI / 180.0;
+
+                let vector = to_cartesian(xf * torad, yf * torad);
+
+                data.normals.push(vector)
+            }
         }
+
+        data
     }
 }
 
@@ -208,49 +218,81 @@ fn gen_threads(data: Arc<Data>) -> Vec<(Arc<DoubleBuffer<Buffer>>, JoinHandle<()
                 (x, y)
             };
 
-            let (hapke_paramsx8, paramsx8, onparamsx8, normalsx8): (
-                [[HapkeParams<f32x8>; ARR_SIZE]; CHANNELS],
-                [[f32x8; ARR_SIZE]; CHANNELS],
-                [[OrenNayarParams<f32x8>; ARR_SIZE]; CHANNELS],
-                [Vec3<f32x8>; ARR_SIZE]
-            ) = {
+            let hapke_paramsx8 = {
+                let mut paramsx8: [Vec<HapkeParams<f32x8>>; CHANNELS]
+                    = array::from_fn(|_| Vec::with_capacity(ARR_SIZE));
+
                 let params = &data.params;
-                let albedo = &data.normalized_albedo.read();
-                let on_params = &data.on_params.read();
 
-                (
-                    array::from_fn(|channel| array::from_fn(|k| array::from_fn(|l| {
-                        let (x, y) = get_coords(k * 8 + l);
-
-                        params[channel][x][y]
-                    }).into())),
-
-                    array::from_fn(|channel| array::from_fn(|k| array::from_fn(|l| {
-                        let (x, y) = get_coords(k * 8 + l);
-
-                        albedo[x][y][channel]
-                    }).into())),
-
-                    array::from_fn(|channel| array::from_fn(|k| array::from_fn(|l| {
-                        let (x, y) = get_coords(k * 8 + l);
-
-                        on_params[x][y][channel]
-                    }).into())),
-
-                    array::from_fn(|k| {
-                        let vecs: [Vec3<f32>; 8] = array::from_fn(|l| {
+                for channel in 0..CHANNELS {
+                    for k in 0..ARR_SIZE {
+                        paramsx8[channel].push(array::from_fn(|l| {
                             let (x, y) = get_coords(k * 8 + l);
 
-                            data.normals[x][y]
-                        });
+                            params[channel][y * 360 + x]
+                        }).into())
+                    }
+                }
 
-                        Vec3::<f32x8>::from([
-                            array::from_fn(|i| vecs[i].x).into(),
-                            array::from_fn(|i| vecs[i].y).into(),
-                            array::from_fn(|i| vecs[i].z).into()]
-                        )
-                    }),
-                )
+                paramsx8
+            };
+
+            let paramsx8 = {
+                let mut paramsx8: [Vec<f32x8>; CHANNELS]
+                    = array::from_fn(|_| Vec::with_capacity(ARR_SIZE));
+
+                let albedo = &data.normalized_albedo.read();
+
+                for channel in 0..CHANNELS {
+                    for k in 0..ARR_SIZE {
+                        paramsx8[channel].push(array::from_fn(|l| {
+                            let (x, y) = get_coords(k * 8 + l);
+
+                            albedo[y * 360 + x][channel]
+                        }).into())
+                    }
+                }
+
+                paramsx8
+            };
+
+            let onparamsx8 = {
+                let mut paramsx8: [Vec<OrenNayarParams<f32x8>>; CHANNELS]
+                    = array::from_fn(|_| Vec::with_capacity(ARR_SIZE));
+
+                let on_params = &data.on_params.read();
+
+                for channel in 0..CHANNELS {
+                    for k in 0..ARR_SIZE {
+                        paramsx8[channel].push(array::from_fn(|l| {
+                            let (x, y) = get_coords(k * 8 + l);
+
+                            on_params[y * 360 + x][channel]
+                        }).into())
+                    }
+                }
+
+                paramsx8
+            };
+
+            let normalsx8 = {
+                let mut paramsx8: Vec<Vec3<f32x8>> = Vec::with_capacity(ARR_SIZE);
+
+                for k in 0..ARR_SIZE {
+                    let vecs: [Vec3<f32>; 8] = array::from_fn(|l| {
+                        let (x, y) = get_coords(k * 8 + l);
+
+                        data.normals[y * 360 + x]
+                    });
+
+                    paramsx8.push(Vec3::<f32x8>::from([
+                        array::from_fn(|i| vecs[i].x).into(),
+                        array::from_fn(|i| vecs[i].y).into(),
+                        array::from_fn(|i| vecs[i].z).into()]
+                    ));
+                }
+
+                paramsx8
             };
 
             loop {
@@ -393,14 +435,14 @@ fn from_spherical(i: f32, e: f32, g: f32) -> (Vec3<f32>, Vec3<f32>, Vec3<f32>) {
 }
 
 fn calculate_normalized_albedo_map(
-    buffer: &mut [[[f32; 3]; 180]; 360],
-    params: &[Box<[[HapkeParams<f32>; 180]; 360]>; 3],
+    buffer: &mut Vec<[f32; 3]>,
+    params: &[Vec<HapkeParams<f32>>; 3],
     i: f32, e: f32, g: f32
 ) {
-    for k in 0..360 {
-        for j in 0..180 {
+    for j in 0..180 {
+        for k in 0..360 {
             let shader = Hapke::new(array::from_fn(|i|
-                HapkeParams::<f32x8>::from([params[i][k][j]; 8])
+                HapkeParams::<f32x8>::from([params[i][j * 360 + k]; 8])
             ));
 
             let (light, normal, camera) = from_spherical(i, e, g);
@@ -412,25 +454,25 @@ fn calculate_normalized_albedo_map(
                 None
             );
 
-            buffer[k][j] = value.map(|value| value / i.cos());
+            buffer.push(value.map(|value| value / i.cos()));
         }
     }
 }
 
 fn calculate_onparam_map(
-    buffer: &mut [[[OrenNayarParams<f32>; 3]; 180]; 360],
-    params: &[Box<[[HapkeParams<f32>; 180]; 360]>; 3],
+    buffer: &mut Vec<[OrenNayarParams<f32>; 3]>,
+    params: &[Vec<HapkeParams<f32>>; 3],
     i: f32, e: f32, g: f32
 ) {
-    for k in 0..360 {
-        for j in 0..180 {
+    for j in 0..180 {
+        for k in 0..360 {
             let shader = Hapke::new(array::from_fn(|i|
-                HapkeParams::<f32x8>::from([params[i][k][j]; 8])
+                HapkeParams::<f32x8>::from([params[i][j * 360 + k]; 8])
             ));
 
             let (light, normal, camera) = from_spherical(i, e, g);
 
-            buffer[k][j] = shader.brdf_non_simd(
+            buffer.push(shader.brdf_non_simd(
                 &light,
                 &normal,
                 &camera,
@@ -438,7 +480,7 @@ fn calculate_onparam_map(
             ).map(|value| OrenNayarParams {
                 albedo: value * 1.3,
                 roughness: 0.55,
-            });
+            }));
         }
     }
 }
@@ -534,7 +576,7 @@ fn main() {
 
                 if let Some((phi, theta)) = polar {
                     let (i, j) = id_from_polar(phi, theta);
-                    let normal = data.normals[i][j].clone();
+                    let normal = data.normals[j * 180 + i].clone();
                     ui.label(format!("Normal: {}", normal));
                 }
 
