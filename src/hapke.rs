@@ -3,6 +3,7 @@ use std::f32::consts::PI;
 use std::ops::Mul;
 use wide::{f32x8, CmpEq, CmpLe};
 use crate::shader::{Shader, ValueDebugger};
+use crate::SIMD_SIZE;
 use crate::vec3::Vec3;
 
 #[derive(Copy, Clone, Default)]
@@ -18,8 +19,8 @@ pub(crate) struct HapkeParams<T> {
     pub phi  : T, // Filling factor - fixed at 1.0
 }
 
-impl From<[HapkeParams<f32>; 8]> for HapkeParams<f32x8> {
-    fn from(value: [HapkeParams<f32>; 8]) -> Self {
+impl From<[HapkeParams<f32>; SIMD_SIZE]> for HapkeParams<f32x8> {
+    fn from(value: [HapkeParams<f32>; SIMD_SIZE]) -> Self {
         Self {
             w: f32x8::from(value.map(|value| value.w)),
             b: f32x8::from(value.map(|value| value.b)),
@@ -54,7 +55,7 @@ impl<const CHANNELS: usize> Shader<HapkeParams<f32x8>, CHANNELS> for Hapke<CHANN
         light: &Vec3<f32x8>,
         normal: &Vec3<f32x8>,
         camera: &Vec3<f32x8>,
-        debugger: [Option<&ValueDebugger>; 8]
+        debugger: [Option<&ValueDebugger>; SIMD_SIZE]
     ) -> [f32x8; CHANNELS] {
         //let K = -f32::ln(1.0 - (1.209 * data.phi.powf(2.0 / 3.0))) / data.phi.powf(2.0 / 3.0);
 
@@ -86,7 +87,7 @@ impl<const CHANNELS: usize> Hapke<CHANNELS> {
         mu0: f32x8,
         mu: f32x8,
         g_cos: f32x8,
-        debugger: [Option<&ValueDebugger>; 8]
+        debugger: [Option<&ValueDebugger>; SIMD_SIZE]
     ) -> [f32x8; CHANNELS] {
         let tan_theta = self.params[0].theta.to_radians().tan();
         let K = 1.0 - self.params[0].phi;
@@ -160,7 +161,7 @@ impl<const CHANNELS: usize> Hapke<CHANNELS> {
             // * (1.0 + data.Bc0 * compute_Bc(g, data.hc))
             * shadowing);
 
-        for j in 0..8 {
+        for j in 0..SIMD_SIZE {
             if let Some(debugger) = debugger[j] {
                 debugger.assign_str(
                     format!("i: {:.3}°\ne: {:.3}°\ng: {:.3}°\nψ: {:.3}°\n\nμ: {:.5}\nμ₀: {:.5}\n\nμe: {:.5}\nμ₀e: {:.5}\n\nShadowing: {:.5}\n\nValue: {}",

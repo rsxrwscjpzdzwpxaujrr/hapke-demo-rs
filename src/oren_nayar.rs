@@ -1,6 +1,7 @@
 use std::f32::consts::PI;
 use wide::{f32x8, CmpLe};
 use crate::shader::{Shader, ValueDebugger};
+use crate::SIMD_SIZE;
 use crate::vec3::Vec3;
 
 #[derive(Copy, Clone, Default)]
@@ -9,8 +10,8 @@ pub(crate) struct OrenNayarParams<T> {
     pub roughness: T,
 }
 
-impl From<[OrenNayarParams<f32>; 8]> for OrenNayarParams<f32x8> {
-    fn from(value: [OrenNayarParams<f32>; 8]) -> Self {
+impl From<[OrenNayarParams<f32>; SIMD_SIZE]> for OrenNayarParams<f32x8> {
+    fn from(value: [OrenNayarParams<f32>; SIMD_SIZE]) -> Self {
         Self {
             albedo: f32x8::from(value.map(|value| value.albedo)),
             roughness: f32x8::from(value.map(|value| value.roughness)),
@@ -34,7 +35,7 @@ impl<const CHANNELS: usize> Shader<OrenNayarParams<f32x8>, CHANNELS> for OrenNay
         light: &Vec3<f32x8>,
         normal: &Vec3<f32x8>,
         camera: &Vec3<f32x8>,
-        debugger: [Option<&ValueDebugger>; 8]
+        debugger: [Option<&ValueDebugger>; SIMD_SIZE]
     ) -> [f32x8; CHANNELS] {
         let mu = -camera.dot(normal);
         let mu0 = -light.dot(normal);
@@ -62,7 +63,7 @@ impl<const CHANNELS: usize> Shader<OrenNayarParams<f32x8>, CHANNELS> for OrenNay
             normal.dot(light) * (a + (b * (s / t))) * params.albedo * PI
         });
 
-        for i in 0..8 {
+        for i in 0..SIMD_SIZE {
             if let Some(debugger) = debugger[i] {
                 debugger.assign_str(
                     format!("μ: {:.5}\nμ₀: {:.5}\n\nRougness: {:.5}\ns: {:.5}\nt: {:.5}\n\nValue: {}",

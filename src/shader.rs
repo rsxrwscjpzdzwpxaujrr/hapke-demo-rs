@@ -1,6 +1,7 @@
 use std::array;
 use std::cell::Cell;
 use wide::f32x8;
+use crate::SIMD_SIZE;
 use crate::vec3::Vec3;
 
 pub(crate) struct ValueDebugger {
@@ -39,7 +40,7 @@ pub(crate) trait Shader<T, const CHANNELS: usize> {
         light: &Vec3<f32x8>,
         normal: &Vec3<f32x8>,
         camera: &Vec3<f32x8>,
-        debugger: [Option<&ValueDebugger>; 8]
+        debugger: [Option<&ValueDebugger>; SIMD_SIZE]
     ) -> [f32x8; CHANNELS];
 
     fn brdf_non_simd(

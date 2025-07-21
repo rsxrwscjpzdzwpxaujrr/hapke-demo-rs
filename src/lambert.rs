@@ -1,5 +1,6 @@
 use wide::{f32x8, CmpLe};
 use crate::shader::{Shader, ValueDebugger};
+use crate::SIMD_SIZE;
 use crate::vec3::Vec3;
 
 pub(crate) struct Lambert<const CHANNELS: usize> {
@@ -18,7 +19,7 @@ impl<const CHANNELS: usize> Shader<f32x8, CHANNELS> for Lambert<CHANNELS> {
         light: &Vec3<f32x8>,
         normal: &Vec3<f32x8>,
         camera: &Vec3<f32x8>,
-        debugger: [Option<&ValueDebugger>; 8]
+        debugger: [Option<&ValueDebugger>; SIMD_SIZE]
     ) -> [f32x8; CHANNELS] {
         //normal.dot(&light.clone()).clamp(0.0, 1.0) * albedo
 
@@ -43,7 +44,7 @@ impl<const CHANNELS: usize> Shader<f32x8, CHANNELS> for Lambert<CHANNELS> {
 
         let result = self.params.map(|albedo| mu0 * albedo);
 
-        for i in 0..8 {
+        for i in 0..SIMD_SIZE {
             if let Some(debugger) = debugger[i] {
                 debugger.assign_str(
                     format!("μ: {:.5}\nμ₀: {:.5}\n\nValue: {}",

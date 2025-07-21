@@ -42,9 +42,17 @@ mod averager;
 mod oren_nayar;
 
 const THREAD_COUNT: usize = 2;
-type Buffer = [u8; (360 / THREAD_COUNT) * 180 * 3];
+const MAP_WIDTH: usize = 360;
+const MAP_HEIGHT: usize = 180;
+const SIMD_SIZE: usize = 8;
+const CHANNELS: usize = 3;
+
+type Buffer = [u8; (MAP_WIDTH / THREAD_COUNT) * MAP_HEIGHT * CHANNELS];
 
 fn load_hapke<P: AsRef<Path>>(path: P) -> Vec<HapkeParams<f32>> {
+    const TEXTURE_FIRST_ROW: usize = 20;
+    const TEXTURE_LAST_ROW: usize = 160;
+
     let f = File::open(path).unwrap();
     let mut decoder = tiff::decoder::Decoder::new(f).unwrap();
     let image = decoder.read_image().unwrap();
@@ -54,14 +62,14 @@ fn load_hapke<P: AsRef<Path>>(path: P) -> Vec<HapkeParams<f32>> {
         _ => panic!(),
     };
 
-    let mut data: Vec<HapkeParams<f32>> = Vec::with_capacity(360 * 180);
+    let mut data: Vec<HapkeParams<f32>> = Vec::with_capacity(MAP_WIDTH * MAP_HEIGHT);
 
-    for row in 0..180 {
-        if row >= 20 && row < 160 {
-            for column in 0..360 {
+    for row in 0..MAP_HEIGHT {
+        if row >= TEXTURE_FIRST_ROW && row < TEXTURE_LAST_ROW {
+            for column in 0..MAP_WIDTH {
                 let mut param = HapkeParams::default();
 
-                let pos = ((160 - row - 1) * 360 + column) * 9;
+                let pos = ((TEXTURE_LAST_ROW - row - 1) * MAP_WIDTH + column) * 9;
 
                 param.w = image_data[pos + 0];
                 param.b = image_data[pos + 1];
@@ -76,7 +84,7 @@ fn load_hapke<P: AsRef<Path>>(path: P) -> Vec<HapkeParams<f32>> {
                 data.push(param);
             }
         } else {
-            for _column in 0..360 {
+            for _column in 0..MAP_WIDTH {
                 data.push(HapkeParams::default());
             }
         }
@@ -169,17 +177,17 @@ impl Data {
             camera: RwLock::new([-0.8171755, 0.22495106, -0.53068].into()),
             mode: RwLock::new(Mode::default()),
             exposure: RwLock::new(2.0),
-            normals: Vec::with_capacity(360 * 180),
+            normals: Vec::with_capacity(MAP_WIDTH * MAP_HEIGHT),
             cursor: RwLock::new((0.0f32, 0.0f32)),
             debug_str: RwLock::new(String::default()),
-            normalized_albedo: RwLock::new(Vec::with_capacity(360 * 180)),
-            on_params: RwLock::new(Vec::with_capacity(360 * 180)),
+            normalized_albedo: RwLock::new(Vec::with_capacity(MAP_WIDTH * MAP_HEIGHT)),
+            on_params: RwLock::new(Vec::with_capacity(MAP_WIDTH * MAP_HEIGHT)),
             avg_time: Averager::new(Duration::from_secs_f32(0.5)),
             avg_calc_time: Averager::new(Duration::from_secs_f32(0.5)),
         };
 
-        for row in 0..180 {
-            for column in 0..360 {
+        for row in 0..MAP_HEIGHT {
+            for column in 0..MAP_WIDTH {
                 let x = column;
                 let y = row;
 
@@ -199,23 +207,24 @@ impl Data {
 }
 
 fn gen_threads(data: Arc<Data>) -> Vec<(Arc<DoubleBuffer<Buffer>>, JoinHandle<()>)> {
+    const THREAD_WIDTH: usize = MAP_WIDTH / THREAD_COUNT;
+    const ARR_SIZE: usize = ((MAP_HEIGHT * THREAD_WIDTH) - SIMD_SIZE) / SIMD_SIZE;
+
     (0..THREAD_COUNT).into_iter().map(|thread_id| {
         let data = data.clone();
 
-        let buffer_out = Arc::new(DoubleBuffer::from([0; (360 / THREAD_COUNT) * 180 * 3]));
+        let buffer_out = Arc::new(
+            DoubleBuffer::from([0; (MAP_WIDTH / THREAD_COUNT) * MAP_HEIGHT * CHANNELS])
+        );
 
         let buffer = buffer_out.clone();
 
         let handle = thread::spawn(move || {
             let offset = thread_id;
 
-            const CHANNELS: usize = 3;
-            const WIDTH: usize = 360 / THREAD_COUNT;
-            const ARR_SIZE: usize = ((180 * WIDTH) - 8) / 8;
-
             let get_coords = |id: usize| -> (usize, usize) {
-                let x = (id % WIDTH) * THREAD_COUNT + offset;
-                let y = id / WIDTH;
+                let x = (id % THREAD_WIDTH) * THREAD_COUNT + offset;
+                let y = id / THREAD_WIDTH;
 
                 (x, y)
             };
@@ -229,9 +238,9 @@ fn gen_threads(data: Arc<Data>) -> Vec<(Arc<DoubleBuffer<Buffer>>, JoinHandle<()
                 for channel in 0..CHANNELS {
                     for k in 0..ARR_SIZE {
                         paramsx8[channel].push(array::from_fn(|l| {
-                            let (x, y) = get_coords(k * 8 + l);
+                            let (x, y) = get_coords(k * SIMD_SIZE + l);
 
-                            params[channel][y * 360 + x]
+                            params[channel][y * MAP_WIDTH + x]
                         }).into())
                     }
                 }
@@ -248,9 +257,9 @@ fn gen_threads(data: Arc<Data>) -> Vec<(Arc<DoubleBuffer<Buffer>>, JoinHandle<()
                 for channel in 0..CHANNELS {
                     for k in 0..ARR_SIZE {
                         paramsx8[channel].push(array::from_fn(|l| {
-                            let (x, y) = get_coords(k * 8 + l);
+                            let (x, y) = get_coords(k * SIMD_SIZE + l);
 
-                            albedo[y * 360 + x][channel]
+                            albedo[y * MAP_WIDTH + x][channel]
                         }).into())
                     }
                 }
@@ -267,9 +276,9 @@ fn gen_threads(data: Arc<Data>) -> Vec<(Arc<DoubleBuffer<Buffer>>, JoinHandle<()
                 for channel in 0..CHANNELS {
                     for k in 0..ARR_SIZE {
                         paramsx8[channel].push(array::from_fn(|l| {
-                            let (x, y) = get_coords(k * 8 + l);
+                            let (x, y) = get_coords(k * SIMD_SIZE + l);
 
-                            on_params[y * 360 + x][channel]
+                            on_params[y * MAP_WIDTH + x][channel]
                         }).into())
                     }
                 }
@@ -281,10 +290,10 @@ fn gen_threads(data: Arc<Data>) -> Vec<(Arc<DoubleBuffer<Buffer>>, JoinHandle<()
                 let mut paramsx8: Vec<Vec3<f32x8>> = Vec::with_capacity(ARR_SIZE);
 
                 for k in 0..ARR_SIZE {
-                    let vecs: [Vec3<f32>; 8] = array::from_fn(|l| {
-                        let (x, y) = get_coords(k * 8 + l);
+                    let vecs: [Vec3<f32>; SIMD_SIZE] = array::from_fn(|l| {
+                        let (x, y) = get_coords(k * SIMD_SIZE + l);
 
-                        data.normals[y * 360 + x]
+                        data.normals[y * MAP_WIDTH + x]
                     });
 
                     paramsx8.push(Vec3::<f32x8>::from([
@@ -309,17 +318,17 @@ fn gen_threads(data: Arc<Data>) -> Vec<(Arc<DoubleBuffer<Buffer>>, JoinHandle<()
 
                 let mut buffer_w = buffer.get_mut();
 
-                let mut our_debuggerx8: [Option<&ValueDebugger>; 8] = Default::default();
+                let mut our_debuggerx8: [Option<&ValueDebugger>; SIMD_SIZE] = Default::default();
 
                 let debugger = ValueDebugger::default();
 
                 let cursor_id = id_from_polar(cursor.0, cursor.1);
-                let cursor_id = ((cursor_id.0 + 180) % 360, cursor_id.1);
+                let cursor_id = ((cursor_id.0 + MAP_HEIGHT) % MAP_WIDTH, cursor_id.1);
 
                 let exposure = 2.0_f32.powf(exposure);
 
-                for k in (0..((180 * WIDTH) - 8)).step_by(8) {
-                    for l in 0..8 {
+                for k in (0..((MAP_HEIGHT * THREAD_WIDTH) - SIMD_SIZE)).step_by(SIMD_SIZE) {
+                    for l in 0..SIMD_SIZE {
                         let (x, y) = get_coords(k + l);
 
                         our_debuggerx8[l] = if x == cursor_id.0 && y == cursor_id.1 {
@@ -334,34 +343,34 @@ fn gen_threads(data: Arc<Data>) -> Vec<(Arc<DoubleBuffer<Buffer>>, JoinHandle<()
                     let values: [f32x8; CHANNELS] = match mode {
                         Mode::Lambert => {
                             let shader = Lambert::new(array::from_fn(|channel|
-                                paramsx8[channel][k / 8])
+                                paramsx8[channel][k / SIMD_SIZE])
                             );
 
                             shader.brdf(
                                 &light.into(),
-                                &normalsx8[k / 8],
+                                &normalsx8[k / SIMD_SIZE],
                                 &camera.into(),
                                 our_debuggerx8)
                         },
                         Mode::Hapke => {
                             let shader = Hapke::new(array::from_fn(|channel|
-                                hapke_paramsx8[channel][k / 8])
+                                hapke_paramsx8[channel][k / SIMD_SIZE])
                             );
 
                             shader.brdf(
                                 &light.into(),
-                                &normalsx8[k / 8],
+                                &normalsx8[k / SIMD_SIZE],
                                 &camera.into(),
                                 our_debuggerx8)
                         },
                         Mode::OrenNayar => {
                             let shader = OrenNayar::new(array::from_fn(|channel|
-                                onparamsx8[channel][k / 8])
+                                onparamsx8[channel][k / SIMD_SIZE])
                             );
 
                             shader.brdf(
                                 &light.into(),
-                                &normalsx8[k / 8],
+                                &normalsx8[k / SIMD_SIZE],
                                 &camera.into(),
                                 our_debuggerx8)
                         },
@@ -373,9 +382,9 @@ fn gen_threads(data: Arc<Data>) -> Vec<(Arc<DoubleBuffer<Buffer>>, JoinHandle<()
                         value.to_array().map(|value| ((value * exposure).powf(1.0 / 2.2) * 255.0))
                     );
 
-                    for l in 0..8 {
+                    for l in 0..SIMD_SIZE {
                         for channel in 0..CHANNELS {
-                            buffer_w[((k + l) * 3) + channel] = values[channel][l] as u8;
+                            buffer_w[((k + l) * CHANNELS) + channel] = values[channel][l] as u8;
                         }
                     }
                 }
@@ -400,17 +409,20 @@ fn polar_from_screen_coord(x: i32, y: i32, window: &Window) -> Option<(f32, f32)
     let height: i32 = window.size().1 as i32;
 
     if y < height / 2 {
-        let xusize = x / (width  / 360);
-        let yusize = y / (height / 360);
+        let xusize = x / (width  / MAP_WIDTH as i32);
+        let yusize = y / (height / MAP_WIDTH as i32);
 
-        if xusize < 0 || xusize > 360 {
+        if xusize < 0 || xusize > MAP_WIDTH as i32 {
             None
         }
-        else if yusize < 0 || yusize > 180 {
+        else if yusize < 0 || yusize > MAP_HEIGHT as i32 {
             None
         }
         else {
-            Some((((xusize - 180) as f32).to_radians(), ((yusize - 90) as f32).to_radians()))
+            Some((
+                ((xusize - (MAP_WIDTH as i32 / 2)) as f32).to_radians(),
+                ((yusize - (MAP_HEIGHT as i32 / 2)) as f32).to_radians(),
+            ))
         }
     } else {
         // todo
@@ -420,8 +432,8 @@ fn polar_from_screen_coord(x: i32, y: i32, window: &Window) -> Option<(f32, f32)
 
 fn id_from_polar(phi: f32, theta: f32) -> (usize, usize) {
     (
-        ((phi.to_degrees() + 180.0) as usize).clamp(0, 360 - 1),
-        ((theta.to_degrees() + 90.0) as usize).clamp(0, 180 - 1),
+        ((phi.to_degrees() + 180.0) as usize).clamp(0, MAP_WIDTH - 1),
+        ((theta.to_degrees() + 90.0) as usize).clamp(0, MAP_HEIGHT - 1),
     )
 }
 
@@ -441,10 +453,10 @@ fn calculate_normalized_albedo_map(
     params: &[Vec<HapkeParams<f32>>; 3],
     i: f32, e: f32, g: f32
 ) {
-    for j in 0..180 {
-        for k in 0..360 {
+    for row in 0..MAP_HEIGHT {
+        for column in 0..MAP_WIDTH {
             let shader = Hapke::new(array::from_fn(|i|
-                HapkeParams::<f32x8>::from([params[i][j * 360 + k]; 8])
+                HapkeParams::<f32x8>::from([params[i][row * MAP_WIDTH + column]; SIMD_SIZE])
             ));
 
             let (light, normal, camera) = from_spherical(i, e, g);
@@ -466,10 +478,10 @@ fn calculate_onparam_map(
     params: &[Vec<HapkeParams<f32>>; 3],
     i: f32, e: f32, g: f32
 ) {
-    for j in 0..180 {
-        for k in 0..360 {
+    for row in 0..MAP_HEIGHT {
+        for column in 0..MAP_WIDTH {
             let shader = Hapke::new(array::from_fn(|i|
-                HapkeParams::<f32x8>::from([params[i][j * 360 + k]; 8])
+                HapkeParams::<f32x8>::from([params[i][row * MAP_WIDTH + column]; SIMD_SIZE])
             ));
 
             let (light, normal, camera) = from_spherical(i, e, g);
@@ -578,7 +590,7 @@ fn main() {
 
                 if let Some((phi, theta)) = polar {
                     let (i, j) = id_from_polar(phi, theta);
-                    let normal = data.normals[j * 180 + i].clone();
+                    let normal = data.normals[j * MAP_HEIGHT + i].clone();
                     ui.label(format!("Normal: {}", normal));
                 }
 
