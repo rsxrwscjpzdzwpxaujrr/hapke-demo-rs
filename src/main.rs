@@ -56,13 +56,13 @@ fn load_hapke<P: AsRef<Path>>(path: P) -> Vec<HapkeParams<f32>> {
 
     let mut data: Vec<HapkeParams<f32>> = Vec::with_capacity(360 * 180);
 
-    let mut pos = 0;
+    for row in 0..180 {
+        if row >= 20 && row < 160 {
+            for column in 0..360 {
+                let mut param = HapkeParams::default();
 
-    for row in (0..180).rev() {
-        for _column in 0..360 {
-            let mut param = HapkeParams::default();
+                let pos = ((160 - row - 1) * 360 + column) * 9;
 
-            if row >= 20 && row < 160 {
                 param.w = image_data[pos + 0];
                 param.b = image_data[pos + 1];
                 param.c = image_data[pos + 2];
@@ -73,10 +73,12 @@ fn load_hapke<P: AsRef<Path>>(path: P) -> Vec<HapkeParams<f32>> {
                 param.theta = image_data[pos + 7];
                 param.phi = image_data[pos + 8];
 
-                pos += 9;
+                data.push(param);
             }
-
-            data.push(param);
+        } else {
+            for _column in 0..360 {
+                data.push(HapkeParams::default());
+            }
         }
     }
 
