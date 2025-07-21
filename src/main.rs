@@ -47,8 +47,6 @@ const MAP_HEIGHT: usize = 180;
 const SIMD_SIZE: usize = 8;
 const CHANNELS: usize = 3;
 
-type Buffer = [u8; (MAP_WIDTH / THREAD_COUNT) * MAP_HEIGHT * CHANNELS];
-
 fn load_hapke<P: AsRef<Path>>(path: P) -> Vec<HapkeParams<f32>> {
     const TEXTURE_FIRST_ROW: usize = 20;
     const TEXTURE_LAST_ROW: usize = 160;
@@ -206,16 +204,22 @@ impl Data {
     }
 }
 
-fn gen_threads(data: Arc<Data>) -> Vec<(Arc<DoubleBuffer<Buffer>>, JoinHandle<()>)> {
+fn gen_threads(data: Arc<Data>) -> Vec<(Arc<DoubleBuffer<Vec<u8>>>, JoinHandle<()>)> {
     const THREAD_WIDTH: usize = MAP_WIDTH / THREAD_COUNT;
     const ARR_SIZE: usize = ((MAP_HEIGHT * THREAD_WIDTH) - SIMD_SIZE) / SIMD_SIZE;
 
     (0..THREAD_COUNT).into_iter().map(|thread_id| {
         let data = data.clone();
 
-        let buffer_out = Arc::new(
-            DoubleBuffer::from([0; (MAP_WIDTH / THREAD_COUNT) * MAP_HEIGHT * CHANNELS])
-        );
+        const BUFFER_SIZE: usize = (MAP_WIDTH / THREAD_COUNT) * MAP_HEIGHT * CHANNELS;
+
+        let mut buffer = Vec::with_capacity(BUFFER_SIZE);
+
+        for _index in 0..BUFFER_SIZE {
+            buffer.push(0);
+        }
+
+        let buffer_out = Arc::new(DoubleBuffer::from(buffer));
 
         let buffer = buffer_out.clone();
 
