@@ -152,15 +152,15 @@ fn init_window(sdl_context: &Sdl) -> (Window, glow::Context, GLContext) {
 
 struct Data {
     normals: Vec<Vec3<f32>>,
-    params: [Vec<HapkeParams<f32>>; 3],
+    params: [Vec<HapkeParams<f32>>; CHANNELS],
     light: RwLock<Vec3<f32>>,
     camera: RwLock<Vec3<f32>>,
     mode: RwLock<Mode>,
     exposure: RwLock<f32>,
     cursor: RwLock<(f32, f32)>,
     debug_str: RwLock<String>,
-    normalized_albedo: RwLock<Vec<[f32; 3]>>,
-    on_params: RwLock<Vec<[OrenNayarParams<f32>; 3]>>,
+    normalized_albedo: RwLock<Vec<[f32; CHANNELS]>>,
+    on_params: RwLock<Vec<[OrenNayarParams<f32>; CHANNELS]>>,
     avg_time: Averager,
     avg_calc_time: Averager,
 }
@@ -449,8 +449,8 @@ fn from_spherical(i: f32, e: f32, g: f32) -> (Vec3<f32>, Vec3<f32>, Vec3<f32>) {
 }
 
 fn calculate_normalized_albedo_map(
-    buffer: &mut Vec<[f32; 3]>,
-    params: &[Vec<HapkeParams<f32>>; 3],
+    buffer: &mut Vec<[f32; CHANNELS]>,
+    params: &[Vec<HapkeParams<f32>>; CHANNELS],
     i: f32, e: f32, g: f32
 ) {
     for row in 0..MAP_HEIGHT {
@@ -474,8 +474,8 @@ fn calculate_normalized_albedo_map(
 }
 
 fn calculate_onparam_map(
-    buffer: &mut Vec<[OrenNayarParams<f32>; 3]>,
-    params: &[Vec<HapkeParams<f32>>; 3],
+    buffer: &mut Vec<[OrenNayarParams<f32>; CHANNELS]>,
+    params: &[Vec<HapkeParams<f32>>; CHANNELS],
     i: f32, e: f32, g: f32
 ) {
     for row in 0..MAP_HEIGHT {
