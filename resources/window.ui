@@ -75,6 +75,9 @@
                         <property name="enable-undo">False</property>
                       </object>
                     </property>
+                    <style>
+                      <class name="caption"/>
+                    </style>
                     <property name="cursor-visible">False</property>
                     <property name="editable">False</property>
                     <property name="hexpand">True</property>
