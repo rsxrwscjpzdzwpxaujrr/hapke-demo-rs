@@ -7,8 +7,8 @@ use glow::{HasContext, NativeProgram, PixelUnpackData};
 use crate::utils::to_cartesian;
 use crate::vec3::Vec3;
 
-const VS_SRC: &str = "
-#version 150
+const VS_GL_SRC: &str = "
+#version 140
 in vec3 aPosition;
 in vec2 aTexCoord;
 
@@ -21,8 +21,9 @@ void main() {
     TexCoord = aTexCoord;
 }";
 
-const FS_SRC: &str = "
-#version 150
+const FS_GL_SRC: &str = "
+#version 140
+
 out vec4 out_color;
 
 in vec2 TexCoord;
@@ -31,7 +32,40 @@ uniform sampler2D Texture0;
 uniform sampler2D Texture1;
 
 void main() {
-    if (mod(floor(TexCoord.x * 360), 2) == 0) {
+    if (mod(floor(TexCoord.x * 360.0), 2.0) == 0.0) {
+        out_color = texture(Texture0, TexCoord);
+    } else {
+        out_color = texture(Texture1, TexCoord);
+    }
+}";
+
+const VS_GLES_SRC: &str = "
+#version 300 es
+
+in vec3 aPosition;
+in vec2 aTexCoord;
+
+uniform mat4 transformMatrix;
+
+out vec2 TexCoord;
+
+void main() {
+    gl_Position = vec4(aPosition, 1.0) * transformMatrix;
+    TexCoord = aTexCoord;
+}";
+
+const FS_GLES_SRC: &str = "
+#version 300 es
+precision mediump float;
+out vec4 out_color;
+
+in vec2 TexCoord;
+
+uniform sampler2D Texture0;
+uniform sampler2D Texture1;
+
+void main() {
+    if (mod(floor(TexCoord.x * 360.0), 2.0) == 0.0) {
         out_color = texture(Texture0, TexCoord);
     } else {
         out_color = texture(Texture1, TexCoord);
@@ -42,6 +76,7 @@ type VertexType = (Vec3<f32>, [f32; 2]);
 type TriangleType = [VertexType; 3];
 
 pub struct Graphics {
+    context: glow::Context,
     pub program: glow::NativeProgram,
     pub vao: glow::NativeVertexArray,
     pub vbo: glow::NativeBuffer,
@@ -171,8 +206,14 @@ unsafe fn bytes_of<T>(val: &Vec<T>) -> &[u8] {
 }
 
 impl Graphics {
-    pub fn new(gl: &glow::Context) -> Self {
-        let program = unsafe { create_program(gl, VS_SRC, FS_SRC) };
+    pub fn new(gl: glow::Context) -> Self {
+        let program = unsafe {
+            if gl.version().is_embedded {
+                create_program(&gl, VS_GLES_SRC, FS_GLES_SRC)
+            } else {
+                create_program(&gl, VS_GL_SRC, FS_GL_SRC)
+            }
+        };
 
         let mut buffer = Vec::<TriangleType>::with_capacity(256);
 
@@ -227,6 +268,8 @@ impl Graphics {
 
             let tex_uniform = gl.get_uniform_location(program, "Texture1").unwrap();
             gl.uniform_1_i32(Some(&tex_uniform), 1);
+
+            gl.bind_vertex_array(None);
         }
 
         let transform_matrix_loc = unsafe {
@@ -249,11 +292,16 @@ impl Graphics {
             texture
         }) };
 
-        Graphics { program, vao, vbo, textures, transform_matrix_loc, triangle_count }
+        Graphics { context: gl, program, vao, vbo, textures, transform_matrix_loc, triangle_count }
     }
 
-    pub fn draw(&self, gl: &glow::Context, phi: f32, theta: f32) {
+    pub fn draw(&self, phi: f32, theta: f32) {
+        let gl = &self.context;
+
         unsafe {
+            gl.clear_color(0.0, 0.0, 0.0, 1.0);
+            gl.clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);
+
             gl.bind_vertex_array(Some(self.vao));
             gl.use_program(Some(self.program));
             gl.enable(glow::DEPTH_TEST);
@@ -270,7 +318,7 @@ impl Graphics {
                 Vector4::<f32>::new(0.0, 0.0, 0.0, 1.0),
             );
 
-            self.set_transform_matrix(gl, matrix);
+            self.set_transform_matrix(matrix);
 
             gl.active_texture(glow::TEXTURE0);
             //gl.Enable(gl.TEXTURE_2D);
@@ -289,7 +337,7 @@ impl Graphics {
             let matrix = glm::ext::rotate(&matrix, -theta, Vector3::<f32>::new(1.0, 0.0, 0.0));
             let matrix = glm::ext::rotate(&matrix, phi, Vector3::<f32>::new(0.0, 1.0, 0.0));
 
-            self.set_transform_matrix(gl, matrix);
+            self.set_transform_matrix(matrix);
 
             gl.draw_arrays(glow::TRIANGLES, 6, (self.triangle_count * 3) - 6);
 
@@ -306,7 +354,9 @@ impl Graphics {
         }
     }
 
-    pub fn update_texture(&mut self, gl: &glow::Context, data: &[u8], num: usize) {
+    pub fn update_texture(&self, data: &[u8], num: usize) {
+        let gl = &self.context;
+
         unsafe {
             gl.bind_texture(glow::TEXTURE_2D, Some(self.textures[num]));
 
@@ -325,19 +375,9 @@ impl Graphics {
         }
     }
 
-    pub fn deinit(&mut self, gl: &glow::Context) {
-        unsafe {
-            gl.delete_program(self.program);
-            gl.delete_buffer(self.vbo);
-            gl.delete_vertex_array(self.vao);
+    fn set_transform_matrix(&self, matrix: Matrix4<f32>) {
+        let gl = &self.context;
 
-            self.textures.iter().for_each(|texture| {
-                gl.delete_texture(*texture);
-            })
-        }
-    }
-
-    fn set_transform_matrix(&self, gl: &glow::Context, matrix: Matrix4<f32>) {
         //let matrix: [f32] = matrix.as_array().iter().map(|arr| arr.as_array()).collect();
 
         let matrix = [
@@ -353,6 +393,22 @@ impl Graphics {
                 true,
                 &matrix,
             );
+        }
+    }
+}
+
+impl Drop for Graphics {
+    fn drop(&mut self) {
+        let gl = &self.context;
+
+        unsafe {
+            gl.delete_program(self.program);
+            gl.delete_buffer(self.vbo);
+            gl.delete_vertex_array(self.vao);
+
+            self.textures.iter().for_each(|texture| {
+                gl.delete_texture(*texture);
+            })
         }
     }
 }

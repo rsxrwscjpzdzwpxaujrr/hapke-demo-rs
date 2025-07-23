@@ -4,10 +4,13 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-sdl2 = "0.37.0"
 tiff = "0.10.0"
-egui = "0.32.0"
-egui_sdl2_gl = "0.31.0"
 glm = "0.2.3"
 glow = "0.16.0"
 wide = "0.7.33"
+gtk = { version = "0.10.0", package = "gtk4" }
+libloading = "0.8.8"
+epoxy = "0.1.0"
+
+[build-dependencies]
+glib-build-tools = "0.21.0"

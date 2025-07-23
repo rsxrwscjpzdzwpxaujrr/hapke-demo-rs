@@ -1,0 +1,100 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<!-- Created with Cambalache 0.94.1 -->
+<interface>
+  <!-- interface-name hapde-demo-rs-ui.ui -->
+  <requires lib="gtk" version="4.6"/>
+  <template class="Window" parent="GtkApplicationWindow">
+    <property name="resizable">False</property>
+    <property name="title">Hapke demo</property>
+    <child>
+      <object class="GtkOverlay">
+        <property name="width-request">1080</property>
+        <child>
+          <object class="GlArea" id="gl_area">
+            <property name="allowed-apis">gl|gles</property>
+            <property name="has-depth-buffer">True</property>
+            <property name="height-request">1080</property>
+            <property name="width-request">1080</property>
+          </object>
+        </child>
+        <child type="overlay">
+          <object class="GtkFrame">
+            <property name="child">
+              <object class="GtkBox">
+                <style>
+                  <class name="view"/>
+                </style>
+                <property name="orientation">vertical</property>
+                <child>
+                  <object class="GtkBox">
+                    <child>
+                      <object class="GtkLabel">
+                        <property name="label">Exposure:</property>
+                        <property name="margin-start">16</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkScale">
+                        <property name="adjustment">
+                          <object class="GtkAdjustment" id="exposure_adjustment">
+                            <property name="lower">-8.0</property>
+                            <property name="step-increment">0.1</property>
+                            <property name="upper">8.0</property>
+                            <property name="value">2.0</property>
+                          </object>
+                        </property>
+                        <property name="draw-value">True</property>
+                        <property name="fill-level">8.0</property>
+                        <property name="hexpand">True</property>
+                        <property name="value-pos">right</property>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkBox">
+                    <child>
+                      <object class="GtkLabel">
+                        <property name="label">Select shader:</property>
+                        <property name="margin-start">16</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkComboBoxText" id="shader_combobox">
+                        <property name="hexpand">True</property>
+                        <property name="margin-end">16</property>
+                        <property name="margin-start">16</property>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+                <child type="overlay">
+                  <object class="GtkTextView">
+                    <property name="buffer">
+                      <object class="GtkTextBuffer" id="text_buffer">
+                        <property name="enable-undo">False</property>
+                      </object>
+                    </property>
+                    <property name="cursor-visible">False</property>
+                    <property name="editable">False</property>
+                    <property name="hexpand">True</property>
+                    <property name="margin-bottom">16</property>
+                    <property name="margin-end">16</property>
+                    <property name="margin-start">16</property>
+                    <property name="margin-top">16</property>
+                    <property name="vexpand">True</property>
+                  </object>
+                </child>
+              </object>
+            </property>
+            <property name="margin-bottom">556</property>
+            <property name="margin-end">556</property>
+            <property name="margin-start">15</property>
+            <property name="margin-top">16</property>
+          </object>
+        </child>
+      </object>
+    </child>
+  </template>
+  <object class="GtkWindow"/>
+</interface>

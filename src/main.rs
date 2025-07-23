@@ -1,3 +1,4 @@
+use std::sync::RwLock;
 use crate::averager::Averager;
 use crate::shader::{Shader, ValueDebugger};
 use std::f32::consts::{FRAC_PI_3, FRAC_PI_6, PI};
@@ -9,27 +10,21 @@ use std::sync::{Arc, OnceLock};
 use std::{array, thread};
 use std::thread::{sleep, JoinHandle};
 use std::time::{Duration, Instant};
-
 use crate::double_buffer::DoubleBuffer;
 use crate::hapke::{Hapke, HapkeParams};
 use crate::lambert::Lambert;
 use crate::utils::{to_cartesian, to_polar};
 use crate::vec3::Vec3;
-use egui::mutex::RwLock;
-use egui::ViewportId;
-use egui_backend::egui::FullOutput;
-use egui_backend::sdl2::video::GLProfile;
-use egui_backend::{egui, sdl2};
-use egui_backend::{sdl2::event::Event, DpiScaling, ShaderVersion};
-use egui_sdl2_gl as egui_backend;
-use glow::HasContext;
-use sdl2::mouse::MouseButton;
-use sdl2::video::{GLContext, SwapInterval, Window};
-use sdl2::Sdl;
 use tiff::decoder::DecodingResult;
 use wide::f32x8;
 use crate::oren_nayar::{OrenNayar, OrenNayarParams};
+use gtk::prelude::*;
+use gtk::{gio, Application};
+use gtk::glib::clone;
+use crate::window::Window;
 
+mod gl_area;
+mod window;
 mod graphics;
 //mod old;
 mod double_buffer;
@@ -41,11 +36,13 @@ mod vec3;
 mod averager;
 mod oren_nayar;
 
+const APP_ID: &str = "xyz.rsxrwscjpzdzwpxaujrr.hapke_demo_rs";
 const THREAD_COUNT: usize = 2;
 const MAP_WIDTH: usize = 360;
 const MAP_HEIGHT: usize = 180;
 const SIMD_SIZE: usize = 8;
 const CHANNELS: usize = 3;
+const BUFFER_SIZE: usize = (MAP_WIDTH / THREAD_COUNT) * MAP_HEIGHT * CHANNELS;
 
 fn load_hapke<P: AsRef<Path>>(path: P) -> Vec<HapkeParams<f32>> {
     const TEXTURE_FIRST_ROW: usize = 20;
@@ -103,7 +100,7 @@ fn load_hapke<P: AsRef<Path>>(path: P) -> Vec<HapkeParams<f32>> {
 //     data
 // }
 
-#[derive(PartialEq, Copy, Clone)]
+#[derive(PartialEq, Copy, Clone, Debug)]
 enum Mode {
     Lambert,
     Hapke,
@@ -114,38 +111,6 @@ impl Mode {
     fn default() -> Mode {
         Mode::Hapke
     }
-}
-
-fn init_window(sdl_context: &Sdl) -> (Window, glow::Context, GLContext) {
-    let video_subsystem = sdl_context.video().unwrap();
-    let gl_attr = video_subsystem.gl_attr();
-    gl_attr.set_context_profile(GLProfile::Core);
-
-    // Let OpenGL know we are dealing with SRGB colors so that it
-    // can do the blending correctly. Not setting the framebuffer
-    // leads to darkened, oversaturated colors.
-    gl_attr.set_double_buffer(true);
-    // gl_attr.set_multisample_samples(1);
-    gl_attr.set_framebuffer_srgb_compatible(false);
-
-    // OpenGL 3.2 is the minimum that we will support.
-    gl_attr.set_context_version(3, 2);
-
-    let window = video_subsystem
-        .window(
-            "Hapke demo",
-            1080,
-            1080,
-        )
-        .opengl()
-        .build()
-        .unwrap();
-
-    let _ctx = window.gl_create_context().unwrap();
-
-    let gl = unsafe { glow::Context::from_loader_function(|s| video_subsystem.gl_get_proc_address(s) as *const _) };
-
-    (window, gl, _ctx)
 }
 
 struct Data {
@@ -161,6 +126,7 @@ struct Data {
     on_params: RwLock<Vec<[OrenNayarParams<f32>; CHANNELS]>>,
     avg_time: Averager,
     avg_calc_time: Averager,
+    main_buffers: Vec<Arc<DoubleBuffer<Vec<u8>>>>,
 }
 
 impl Data {
@@ -177,12 +143,23 @@ impl Data {
             exposure: RwLock::new(2.0),
             normals: Vec::with_capacity(MAP_WIDTH * MAP_HEIGHT),
             cursor: RwLock::new((0.0f32, 0.0f32)),
-            debug_str: RwLock::new(String::default()),
+            debug_str: Default::default(),
             normalized_albedo: RwLock::new(Vec::with_capacity(MAP_WIDTH * MAP_HEIGHT)),
             on_params: RwLock::new(Vec::with_capacity(MAP_WIDTH * MAP_HEIGHT)),
             avg_time: Averager::new(Duration::from_secs_f32(0.5)),
             avg_calc_time: Averager::new(Duration::from_secs_f32(0.5)),
+            main_buffers: Default::default(),
         };
+
+        for _thread_id in 0..THREAD_COUNT {
+            let mut buffer = Vec::with_capacity(BUFFER_SIZE);
+
+            for _index in 0..BUFFER_SIZE {
+                buffer.push(0);
+            }
+
+            data.main_buffers.push(Arc::new(DoubleBuffer::from(buffer)));
+        }
 
         for row in 0..MAP_HEIGHT {
             for column in 0..MAP_WIDTH {
@@ -211,15 +188,13 @@ fn gen_threads(data: Arc<Data>) -> Vec<(Arc<DoubleBuffer<Vec<u8>>>, JoinHandle<(
     (0..THREAD_COUNT).into_iter().map(|thread_id| {
         let data = data.clone();
 
-        const BUFFER_SIZE: usize = (MAP_WIDTH / THREAD_COUNT) * MAP_HEIGHT * CHANNELS;
-
         let mut buffer = Vec::with_capacity(BUFFER_SIZE);
 
         for _index in 0..BUFFER_SIZE {
             buffer.push(0);
         }
 
-        let buffer_out = Arc::new(DoubleBuffer::from(buffer));
+        let buffer_out = data.main_buffers[thread_id].clone();
 
         let buffer = buffer_out.clone();
 
@@ -256,7 +231,7 @@ fn gen_threads(data: Arc<Data>) -> Vec<(Arc<DoubleBuffer<Vec<u8>>>, JoinHandle<(
                 let mut paramsx8: [Vec<f32x8>; CHANNELS]
                     = array::from_fn(|_| Vec::with_capacity(ARR_SIZE));
 
-                let albedo = &data.normalized_albedo.read();
+                let albedo = &data.normalized_albedo.read().unwrap();
 
                 for channel in 0..CHANNELS {
                     for k in 0..ARR_SIZE {
@@ -275,7 +250,7 @@ fn gen_threads(data: Arc<Data>) -> Vec<(Arc<DoubleBuffer<Vec<u8>>>, JoinHandle<(
                 let mut paramsx8: [Vec<OrenNayarParams<f32x8>>; CHANNELS]
                     = array::from_fn(|_| Vec::with_capacity(ARR_SIZE));
 
-                let on_params = &data.on_params.read();
+                let on_params = &data.on_params.read().unwrap();
 
                 for channel in 0..CHANNELS {
                     for k in 0..ARR_SIZE {
@@ -314,11 +289,11 @@ fn gen_threads(data: Arc<Data>) -> Vec<(Arc<DoubleBuffer<Vec<u8>>>, JoinHandle<(
                 let start_time = Instant::now();
                 let mut calc_time = Duration::default();
 
-                let light = data.light.read().clone();
-                let camera = data.camera.read().clone();
-                let mode = *(data.mode.read());
-                let exposure = data.exposure.read().clone();
-                let cursor = data.cursor.read().clone();
+                let light = data.light.read().unwrap().clone();
+                let camera = data.camera.read().unwrap().clone();
+                let mode = *(data.mode.read().unwrap());
+                let exposure = data.exposure.read().unwrap().clone();
+                let cursor = data.cursor.read().unwrap().clone();
 
                 let mut buffer_w = buffer.get_mut();
 
@@ -396,7 +371,7 @@ fn gen_threads(data: Arc<Data>) -> Vec<(Arc<DoubleBuffer<Vec<u8>>>, JoinHandle<(
                 buffer.flip();
 
                 if !debugger.empty() {
-                    *data.debug_str.write() = debugger.get();
+                    *data.debug_str.write().unwrap() = debugger.get();
                 }
 
                 data.avg_time.add_measurement(start_time.elapsed().as_secs_f32());
@@ -408,9 +383,9 @@ fn gen_threads(data: Arc<Data>) -> Vec<(Arc<DoubleBuffer<Vec<u8>>>, JoinHandle<(
     }).collect()
 }
 
-fn polar_from_screen_coord(x: i32, y: i32, window: &Window) -> Option<(f32, f32)> {
-    let width: i32 = window.size().0 as i32;
-    let height: i32 = window.size().1 as i32;
+fn polar_from_screen_coord(x: i32, y: i32) -> Option<(f32, f32)> {
+    let width: i32 = 1080;//window.size().0 as i32;
+    let height: i32 = 1080;//window.size().1 as i32;
 
     if y < height / 2 {
         let xusize = x / (width  / MAP_WIDTH as i32);
@@ -504,28 +479,27 @@ fn calculate_onparam_map(
 }
 
 fn main() {
-    let sdl_context = sdl2::init().unwrap();
+    // Load GL pointers from epoxy (GL context management library used by GTK).
+    {
+        #[cfg(target_os = "macos")]
+        let library = unsafe { libloading::os::unix::Library::new("libepoxy.0.dylib") }.unwrap();
+        #[cfg(all(unix, not(target_os = "macos")))]
+        let library = unsafe { libloading::os::unix::Library::new("libepoxy.so.0") }.unwrap();
+        #[cfg(windows)]
+        let library = libloading::os::windows::Library::open_already_loaded("libepoxy-0.dll")
+            .or_else(|_| libloading::os::windows::Library::open_already_loaded("epoxy-0.dll"))
+            .unwrap();
 
-    let (window, gl, _ctx) = init_window(&sdl_context);
+        epoxy::load_with(|name| {
+            unsafe { library.get::<_>(name.as_bytes()) }
+                .map(|symbol| *symbol)
+                .unwrap_or(std::ptr::null())
+        });
+    }
 
-    // debug_assert_eq!(gl_attr.context_profile(), GLProfile::Core);
-    // debug_assert_eq!(gl_attr.context_version(), (3, 2));
+    gio::resources_register_include!("resources.gresource").unwrap();
 
-    // Enable vsync
-    if let Err(error) = window.subsystem().gl_set_swap_interval(SwapInterval::VSync) {
-        println!(
-            "Failed to gl_set_swap_interval(SwapInterval::VSync): {}",
-            error
-        );
-    };
-
-    // Init egui stuff
-    let (mut painter, mut egui_state) =
-        egui_backend::with_sdl2(&window, ShaderVersion::Default, DpiScaling::Default);
-    let egui_ctx = egui::Context::default();
-    let mut event_pump: sdl2::EventPump = sdl_context.event_pump().unwrap();
-
-    let mut quit = false;
+    let app = Application::builder().application_id(APP_ID).build();
 
     let data = Arc::new(Data::new());
 
@@ -533,8 +507,8 @@ fn main() {
     let e = 0.001;
     let g = FRAC_PI_6;
 
-    calculate_normalized_albedo_map(data.normalized_albedo.write().deref_mut(), &data.params, i, e, g);
-    calculate_onparam_map(data.on_params.write().deref_mut(), &data.params, i, e, g);
+    calculate_normalized_albedo_map(data.normalized_albedo.write().unwrap().deref_mut(), &data.params, i, e, g);
+    calculate_onparam_map(data.on_params.write().unwrap().deref_mut(), &data.params, i, e, g);
 
     //let mut tex: [[f32; 180]; 360] = [[0.5; 180]; 360];
 
@@ -542,160 +516,12 @@ fn main() {
 
     let threads = gen_threads(data.clone());
 
-    let mut triangle = graphics::Graphics::new(&gl);
-
-    let start_time = Instant::now();
-
-    while !quit {
-        egui_state.input.time = Some(start_time.elapsed().as_secs_f64());
-        egui_ctx.begin_frame(egui_state.input.take());
-
-        // An example of how OpenGL can be used to draw custom stuff with egui
-        // overlaying it:
-        // First clear the background to something nice.
-        unsafe {
-            // Clear the screen to green
-            gl.clear_color(0.0, 0.0, 0.0, 0.0);
-            gl.clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);
+    app.connect_activate(clone!{
+        #[strong] data,
+        move |app|
+            Window::new(app, data.clone()).present()
         }
+    );
 
-        threads.iter().enumerate().for_each(|(i, (buffer, _))| {
-            if let Some(buffer) = buffer.read() {
-                triangle.update_texture(&gl, buffer.as_ref(), i);
-            }
-        });
-
-        let camera_polar = to_polar(*data.camera.read());
-
-        // Then draw our triangle.
-        triangle.draw(&gl, camera_polar.0, camera_polar.1);
-
-        let e_window = {
-            let light = &data.light.write();
-            let camera = &data.camera.write();
-            let mut exposure = data.exposure.write();
-            let mut mode = data.mode.write();
-            let debug_str = data.debug_str.read().clone();
-            let mouse = event_pump.mouse_state();
-
-            let (x, y) = (mouse.x(), window.size().1 as i32 - mouse.y());
-
-            let polar = polar_from_screen_coord(x, y, &window);
-
-            egui::Window::new("Parameters").show(&egui_ctx, |ui| {
-                ui.set_min_width(350.0);
-
-                ui.add(egui::Slider::new(exposure.deref_mut(), -8.0..=8.0).text("exposure"));
-
-                ui.label(" ");
-
-                ui.label(format!("Light vector: {}", light));
-                ui.label(format!("Camera vector: {}", camera));
-
-                if let Some((phi, theta)) = polar {
-                    let (i, j) = id_from_polar(phi, theta);
-                    let normal = data.normals[j * MAP_HEIGHT + i].clone();
-                    ui.label(format!("Normal: {}", normal));
-                }
-
-                ui.label(" ");
-
-                debug_str.lines().for_each(|line| { ui.label(line); });
-
-                ui.label(" ");
-
-                ui.label(format!("Time: {:.4} sec", data.avg_time.average()));
-                ui.label(format!("Calc time: {:.4} sec", data.avg_calc_time.average()));
-
-                ui.label(" ");
-
-                ui.label("Select shader:");
-                ui.selectable_value(mode.deref_mut(), Mode::Lambert, "Lambert");
-                ui.selectable_value(mode.deref_mut(), Mode::Hapke, "Hapke");
-                ui.selectable_value(mode.deref_mut(), Mode::OrenNayar, "Oren-Nayar");
-                ui.label(" ");
-                if ui.button("Quit").clicked() {
-                    quit = true;
-                }
-            })
-        };
-
-        let gui_rect = e_window.unwrap().response.rect;
-
-        let FullOutput {
-            platform_output,
-            textures_delta,
-            shapes,
-            pixels_per_point,
-            viewport_output,
-        } = egui_ctx.end_frame();
-        // Process output
-        egui_state.process_output(&window, &platform_output);
-
-        unsafe { gl.disable(glow::DEPTH_TEST) };
-
-        let paint_jobs = egui_ctx.tessellate(shapes, pixels_per_point);
-
-        // Note: passing a bg_color to paint_jobs will clear any previously drawn stuff.
-        // Use this only if egui is being used for all drawing and you aren't mixing your own Open GL
-        // drawing calls with it.
-        // Since we are custom drawing an OpenGL Triangle we don't need egui to clear the background.
-        painter.paint_jobs(None, textures_delta, paint_jobs);
-
-        window.gl_swap_window();
-
-        let repaint_after = viewport_output
-            .get(&ViewportId::ROOT)
-            .expect("Missing ViewportId::ROOT")
-            .repaint_delay;
-
-        if !repaint_after.is_zero() {
-            if let Some(event) = event_pump.wait_event_timeout(4) {
-                match event {
-                    Event::Quit { .. } => quit = true,
-                    _ => {
-                        // Process input event
-                        egui_state.process_input(&window, event, &mut painter);
-                    }
-                }
-            }
-        } else {
-            for event in event_pump.poll_iter() {
-                match event {
-                    _ => {
-                        // Process input event
-                        egui_state.process_input(&window, event, &mut painter);
-                    }
-                }
-            }
-        }
-
-        let mouse = event_pump.mouse_state();
-
-        if !gui_rect.contains((mouse.x() as f32, mouse.y() as f32).into()) {
-            let polar = polar_from_screen_coord(mouse.x(), window.size().1 as i32 - mouse.y(), &window);
-
-            if let Some((phi, theta)) = polar {
-                let mut cursor = data.cursor.write();
-                *cursor.deref_mut() = (phi, theta);
-
-                let vector = -to_cartesian(phi, theta);
-
-                mouse.pressed_mouse_buttons().for_each(|button| {
-                    let mut light = data.light.write();
-                    let mut camera = data.camera.write();
-
-                    *(match button {
-                        MouseButton::Left => light,
-                        MouseButton::Right => camera,
-                        _ => unimplemented!(),
-                    }) = vector.clone();
-                });
-            }
-        }
-    }
-
-    triangle.deinit(&gl);
-
-    //thread.join();
+    app.run();
 }
